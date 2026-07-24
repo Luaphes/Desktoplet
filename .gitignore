@@ -1,0 +1,11 @@
+.pio/
+.pioenvs/
+.piolibdeps/
+.piotmp/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+venv/
+*.bin
+firmware.bin
