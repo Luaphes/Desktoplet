@@ -64,7 +64,8 @@ void OLEDDisplay::showChinese(const String &text, int x, int y) {
     if (!_display) return;
     _display->firstPage();
     do {
-        _display->setFont(u8g2_font_unifont_t_chinese2);
+        _display->enableUTF8Print();
+        _display->setFont(u8g2_font_wqy12_t_chinese1);
         _display->setCursor(x, y);
         _display->print(text);
     } while (_display->nextPage());
@@ -74,7 +75,8 @@ void OLEDDisplay::chineseCentered(const String &text, int y) {
     if (!_display) return;
     _display->firstPage();
     do {
-        _display->setFont(u8g2_font_unifont_t_chinese2);
+        _display->enableUTF8Print();
+        _display->setFont(u8g2_font_wqy12_t_chinese1);
         int w = _display->getStrWidth(text.c_str());
         _display->setCursor((SCREEN_WIDTH - w) / 2, y);
         _display->print(text);

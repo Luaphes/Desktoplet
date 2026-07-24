@@ -25,8 +25,9 @@ ESP32 = None
 OTA_PORT = 23717
 CMD_FILE = "/tmp/ws_cmd.json"
 _last_cmd_mtime = 0
-_last_display_msg = ""
-_default_display_msg = ""
+_last_btn_time = 0
+_is_restored = False
+_cmd_queue = []
 
 async def _update_display(msg):
     global _last_display_msg
@@ -34,10 +35,11 @@ async def _update_display(msg):
     if ESP32:
         await ESP32.send(msg)
         print(f"[CMD] {msg}")
+    else:
+        _cmd_queue.append(msg)
+        print(f"[QUEUE] {msg}")
 
-_waiting_loop = False
-_last_btn_time = 0
-_is_restored = False
+_last_run_id = 0
 
 async def _animate_dots():
     """等待动画：三个点轮流闪烁"""
@@ -140,8 +142,11 @@ async def handler(websocket):
     ESP32 = websocket
     print(f"[+] ESP32 connected from {websocket.remote_address}")
 
-    # 重连时播 HERMES 动画
-    await _restore_animation()
+    # 重连时发队列中的命令
+    while _cmd_queue:
+        msg = _cmd_queue.pop(0)
+        await ESP32.send(msg)
+        print(f"[FLUSH] {msg}")
 
     try:
         async for message in websocket:
