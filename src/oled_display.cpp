@@ -1,5 +1,6 @@
 #include "oled_display.h"
 #include "pins.h"
+#include "version.h"
 
 OLEDDisplay display;
 
@@ -121,12 +122,16 @@ void OLEDDisplay::clear() {
 
 void OLEDDisplay::bootAnimation() {
     if (!_display) return;
-    // "Link Start!" 居中显示 2 秒
+    // "Link Start!" 居中 + 版本号右下角
     _display->firstPage();
     do {
         _display->setFont(u8g2_font_ncenB14_tr);
         _display->setCursor(8, 36);
         _display->print("Link Start!");
+
+        _display->setFont(u8g2_font_ncenB08_tr);
+        _display->setCursor(104, 60);
+        _display->print(FIRMWARE_VERSION);
     } while (_display->nextPage());
     delay(2000);
 }

@@ -35,6 +35,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set firmware version
+        run: echo '#define FIRMWARE_VERSION "v${{ github.run_number }}"' > src/version.h
+
       - name: Install PlatformIO Core
         run: pip install platformio
 

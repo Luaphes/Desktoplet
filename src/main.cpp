@@ -18,6 +18,7 @@ enum SystemState {
 
 static SystemState state = STATE_BOOT;
 static unsigned long lastWiFiCheck = 0;
+static unsigned long _connectStart = 0;
 static bool otaInProgress = false;
 
 // ---------- 处理收到的 WebSocket 消息 ----------
@@ -190,16 +191,15 @@ void loop() {
                     // 断线了
                     state = STATE_CONNECTING;
                     display.showStatus("WiFi lost", "Reconnecting...");
+                    _connectStart = now;
                 }
             }
         }
 
-        // WiFi 断开时主动重连
-        if (!wifiManager.isConnected() && state == STATE_CONNECTING) {
-            static unsigned long lastReconnect = 0;
-            if (now - lastReconnect > 5000) {
-                lastReconnect = now;
-                WiFi.reconnect();
+        // WiFi 重连超时（2 分钟不进配网 → 清 NVS 进配网）
+        if (state == STATE_CONNECTING && !wifiManager.isConnected()) {
+            if (now - _connectStart > 120000) {
+                wifiManager.clearAndRestart();
             }
         }
     }
