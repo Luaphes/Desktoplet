@@ -3,8 +3,16 @@ name: Build and Release ESP32 Firmware
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'partitions_ota.csv'
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'partitions_ota.csv'
 
 jobs:
   build:
