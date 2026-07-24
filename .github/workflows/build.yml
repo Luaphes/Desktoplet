@@ -1,3 +1,44 @@
+name: Build and Release ESP32 Firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO Core
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Upload .bin as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-bin
+          path: .pio/build/esp32-c3-supermini/firmware.bin
+
       - name: Get commit message
         id: commit_msg
         run: echo "body<<EOF" >> $GITHUB_OUTPUT && git log -1 --format='%B' >> $GITHUB_OUTPUT && echo "EOF" >> $GITHUB_OUTPUT
