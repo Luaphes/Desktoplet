@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "oled_display.h"
 #include "pins.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -124,6 +125,9 @@ void WiFiManager::startConfigPortal() {
     server.on("/save", handleSave);
     server.onNotFound(handleNotFound);
     server.begin();
+
+    // OLED 显示配网信息
+    display.showStatus("Config Mode", "ESP32-Config");
 
     // 仅在此模式下阻塞，等配网完成
     unsigned long start = millis();
