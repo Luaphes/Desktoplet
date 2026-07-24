@@ -197,9 +197,9 @@ void loop() {
             }
         }
 
-        // WiFi 重连超时（60 秒不进配网 → 清 NVS 进配网）
+        // WiFi 重连超时（2 分钟不进配网 → 清 NVS 进配网）
         if (state == STATE_CONNECTING && !wifiManager.isConnected()) {
-            if (now - _connectStart > 60000) {
+            if (now - _connectStart > 120000) {
                 wifiManager.clearAndRestart();
             }
         }
