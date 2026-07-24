@@ -7,12 +7,14 @@ on:
       - 'src/**'
       - 'platformio.ini'
       - 'partitions_ota.csv'
+      - 'version.txt'
   pull_request:
     branches: [main]
     paths:
       - 'src/**'
       - 'platformio.ini'
       - 'partitions_ota.csv'
+      - 'version.txt'
 
 jobs:
   build:
@@ -36,7 +38,10 @@ jobs:
           python-version: '3.11'
 
       - name: Set firmware version
-        run: echo '#define FIRMWARE_VERSION "v${{ github.run_number }}"' > src/version.h
+        run: |
+          VER=v$(cat version.txt | tr -d ' \t\n\r')
+          echo "VERSION=$VER" >> $GITHUB_ENV
+          echo "Firmware version: $VER"
 
       - name: Install PlatformIO Core
         run: pip install platformio
@@ -58,7 +63,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: "v${{ github.run_number }}"
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
           body: ${{ steps.commit_msg.outputs.body }}
           files: .pio/build/esp32-c3-supermini/firmware.bin
