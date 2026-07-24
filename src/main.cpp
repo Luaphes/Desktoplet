@@ -193,6 +193,15 @@ void loop() {
                 }
             }
         }
+
+        // WiFi 断开时主动重连
+        if (!wifiManager.isConnected() && state == STATE_CONNECTING) {
+            static unsigned long lastReconnect = 0;
+            if (now - lastReconnect > 5000) {
+                lastReconnect = now;
+                WiFi.reconnect();
+            }
+        }
     }
 
     // WebSocket loop

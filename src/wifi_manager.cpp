@@ -109,7 +109,8 @@ void WiFiManager::init() {
         // 没有配网记录，进配网模式
         startConfigPortal();
     } else {
-        // 连 WiFi
+        // 连 WiFi，开启自动重连
+        WiFi.setAutoReconnect(true);
         WiFi.begin(cfg_ssid.c_str(), cfg_pass.c_str());
         // 不阻塞，后台连接
     }
