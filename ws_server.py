@@ -20,6 +20,9 @@ import socket
 import os
 import sys
 import time
+import urllib.request
+import urllib.error
+import shutil
 
 ESP32 = None
 OTA_PORT = 23717
@@ -38,6 +41,38 @@ async def _update_display(msg):
 _waiting_loop = False
 _last_btn_time = 0
 _is_restored = False
+_gh_repo = "Luaphes/Desktoplet"
+_last_release_id = 0
+
+async def _check_github_release():
+    """轮询 GitHub Releases，有新版本就下载 .bin 并推 OTA"""
+    global _last_release_id
+    url = f"https://api.github.com/repos/{_gh_repo}/releases/latest"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Hermes-ECS"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            rel_id = data.get("id", 0)
+            if rel_id > _last_release_id:
+                _last_release_id = rel_id
+                # 找到 .bin 下载链接
+                for asset in data.get("assets", []):
+                    if asset["name"] == "firmware.bin":
+                        dl_url = asset["browser_download_url"]
+                        print(f"[OTA] New release detected: {data['tag_name']}")
+                        # 下载 .bin
+                        bin_path = f"/tmp/firmware-{rel_id}.bin"
+                        urllib.request.urlretrieve(dl_url, bin_path)
+                        print(f"[OTA] Downloaded to {bin_path}")
+                        # 复制到项目目录
+                        os.makedirs("/root/esp32-firmware", exist_ok=True)
+                        import shutil
+                        shutil.copy(bin_path, "/root/esp32-firmware/firmware.bin")
+                        print(f"[OTA] .bin ready at /root/esp32-firmware/firmware.bin")
+                        break
+    except Exception as e:
+        # GitHub API 限流时静默忽略
+        pass
 
 async def _animate_dots():
     """等待动画：三个点轮流闪烁"""
@@ -224,10 +259,11 @@ async def main():
             if sys.stdin.isatty():
                 await stdin_forward()
             else:
-                # 后台模式：监控命令文件 + 等待连接
+                # 后台模式：监控命令文件 + GitHub Release 轮询
                 while True:
                     await _check_cmd_file()
-                    await asyncio.sleep(2)
+                    await _check_github_release()
+                    await asyncio.sleep(60)
         except (EOFError, OSError):
             # 无终端时直接挂起等待
             while True:
