@@ -20,10 +20,6 @@ import socket
 import os
 import sys
 import time
-import urllib.request
-import urllib.error
-import shutil
-import zipfile
 
 ESP32 = None
 OTA_PORT = 23717
@@ -42,47 +38,6 @@ async def _update_display(msg):
 _waiting_loop = False
 _last_btn_time = 0
 _is_restored = False
-_gh_repo = "Luaphes/Desktoplet"
-_last_run_id = 0
-
-async def _check_github_release():
-    """轮询 GitHub Actions 产物，新构建下载 .bin"""
-    global _last_run_id
-    try:
-        # 取最新的成功 run
-        url = f"https://api.github.com/repos/{_gh_repo}/actions/runs?per_page=1&status=success&branch=main"
-        req = urllib.request.Request(url, headers={"User-Agent": "Hermes-ECS", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            runs = json.loads(resp.read())["workflow_runs"]
-            if not runs: return
-            run = runs[0]
-            run_id = run["id"]
-            if run_id <= _last_run_id: return
-            _last_run_id = run_id
-            print(f"[OTA] New build #{run['run_number']} detected")
-
-        # 取 artifact
-        art_url = f"https://api.github.com/repos/{_gh_repo}/actions/runs/{run_id}/artifacts"
-        req = urllib.request.Request(art_url, headers={"User-Agent": "Hermes-ECS", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            arts = json.loads(resp.read())["artifacts"]
-            for art in arts:
-                if art["name"] == "firmware-bin":
-                    dl_url = art["archive_download_url"]
-                    req2 = urllib.request.Request(dl_url, headers={"User-Agent": "Hermes-ECS", "Accept": "application/vnd.github+json"})
-                    with urllib.request.urlopen(req2, timeout=30) as zip_resp:
-                        zip_path = f"/tmp/firmware-{run_id}.zip"
-                        with open(zip_path, "wb") as f:
-                            f.write(zip_resp.read())
-                        import zipfile
-                        with zipfile.ZipFile(zip_path) as zf:
-                            os.makedirs("/root/esp32-firmware", exist_ok=True)
-                            zf.extract("firmware.bin", "/root/esp32-firmware/")
-                        os.remove(zip_path)
-                        print(f"[OTA] .bin ready (build #{run['run_number']})")
-                    break
-    except Exception as e:
-        pass
 
 async def _animate_dots():
     """等待动画：三个点轮流闪烁"""
@@ -269,11 +224,10 @@ async def main():
             if sys.stdin.isatty():
                 await stdin_forward()
             else:
-                # 后台模式：监控命令文件 + GitHub Release 轮询
+                # 后台模式：监控命令文件
                 while True:
                     await _check_cmd_file()
-                    await _check_github_release()
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(2)
         except (EOFError, OSError):
             # 无终端时直接挂起等待
             while True:
