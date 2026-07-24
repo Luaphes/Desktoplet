@@ -109,17 +109,9 @@ void WiFiManager::init() {
         // 没有配网记录，进配网模式
         startConfigPortal();
     } else {
-        // 尝试连 WiFi（阻塞 10 秒看能不能连上）
-        WiFi.setAutoReconnect(false);
+        // 连 WiFi，后台连接，不阻塞
+        WiFi.setAutoReconnect(true);
         WiFi.begin(cfg_ssid.c_str(), cfg_pass.c_str());
-        WiFi.waitForConnectResult(10000);  // 等 10 秒
-        if (WiFi.status() != WL_CONNECTED) {
-            // 连不上，密码/热点已变，清 NVS 进配网
-            WiFi.disconnect(true);  // true = 清空 ESP32 内部 WiFi 配置
-            clearAndRestart();
-        } else {
-            WiFi.setAutoReconnect(true);
-        }
     }
 }
 
