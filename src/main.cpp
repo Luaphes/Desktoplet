@@ -70,6 +70,51 @@ void handleWSMessage(const String &msg) {
         display.clear();
         return;
     }
+
+    // 中文显示
+    if (type == "chinese") {
+        String text = doc["text"] | "";
+        if (text.length() > 0) {
+            display.chineseCentered(text, 20);
+        }
+        return;
+    }
+
+    // 点阵图
+    if (type == "bitmap") {
+        int x = doc["x"] | 0;
+        int y = doc["y"] | 0;
+        int w = doc["w"] | 0;
+        int h = doc["h"] | 0;
+        JsonArray arr = doc["data"].as<JsonArray>();
+        if (w > 0 && h > 0 && arr.size() > 0) {
+            uint8_t *buf = new uint8_t[arr.size()];
+            for (size_t i = 0; i < arr.size(); i++) {
+                buf[i] = arr[i].as<uint8_t>();
+            }
+            display.drawBitmap(x, y, w, h, buf);
+            delete[] buf;
+        }
+        return;
+    }
+
+    // 多行排版
+    if (type == "multi") {
+        JsonArray lines = doc["lines"].as<JsonArray>();
+        if (lines.size() > 0) {
+            OLEDDisplay::Line lineBuf[8];
+            uint8_t count = min((uint8_t)lines.size(), (uint8_t)8);
+            for (uint8_t i = 0; i < count; i++) {
+                JsonObject l = lines[i];
+                lineBuf[i].text = l["text"] | "";
+                String a = l["align"] | "c";
+                lineBuf[i].align = (a == "l") ? 0 : (a == "r") ? 2 : 1;
+                lineBuf[i].size = l["size"] | 1;
+            }
+            display.showMulti(lineBuf, count);
+        }
+        return;
+    }
 }
 
 // ---------- setup ----------
