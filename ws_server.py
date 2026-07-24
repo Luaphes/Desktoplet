@@ -223,7 +223,7 @@ async def main():
     print(f"OTA 端口: {OTA_PORT}")
     print()
 
-    async with websockets.serve(handler, "0.0.0.0", 8765):
+    async with websockets.serve(handler, "0.0.0.0", 8765, ping_interval=15, ping_timeout=10):
         # 有终端交互时用 stdin_forward，后台模式则只等待
         try:
             if sys.stdin.isatty():

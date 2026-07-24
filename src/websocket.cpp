@@ -36,6 +36,12 @@ void WSClient::init(const String &host, int port) {
 
 void WSClient::loop() {
     ws.loop();
+    // 每隔10秒检查连接状态，防止静默断开
+    static unsigned long lastPing = 0;
+    if (_connected && millis() - lastPing > 30000) {
+        lastPing = millis();
+        ws.sendTXT("{\"type\":\"ping\"}");
+    }
 }
 
 bool WSClient::isConnected() {
