@@ -23,6 +23,7 @@ import time
 import urllib.request
 import urllib.error
 import shutil
+import zipfile
 
 ESP32 = None
 OTA_PORT = 23717
@@ -42,36 +43,45 @@ _waiting_loop = False
 _last_btn_time = 0
 _is_restored = False
 _gh_repo = "Luaphes/Desktoplet"
-_last_release_id = 0
+_last_run_id = 0
 
 async def _check_github_release():
-    """轮询 GitHub Releases，有新版本就下载 .bin 并推 OTA"""
-    global _last_release_id
-    url = f"https://api.github.com/repos/{_gh_repo}/releases/latest"
+    """轮询 GitHub Actions 产物，新构建下载 .bin"""
+    global _last_run_id
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hermes-ECS"})
+        # 取最新的成功 run
+        url = f"https://api.github.com/repos/{_gh_repo}/actions/runs?per_page=1&status=success&branch=main"
+        req = urllib.request.Request(url, headers={"User-Agent": "Hermes-ECS", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-            rel_id = data.get("id", 0)
-            if rel_id > _last_release_id:
-                _last_release_id = rel_id
-                # 找到 .bin 下载链接
-                for asset in data.get("assets", []):
-                    if asset["name"] == "firmware.bin":
-                        dl_url = asset["browser_download_url"]
-                        print(f"[OTA] New release detected: {data['tag_name']}")
-                        # 下载 .bin
-                        bin_path = f"/tmp/firmware-{rel_id}.bin"
-                        urllib.request.urlretrieve(dl_url, bin_path)
-                        print(f"[OTA] Downloaded to {bin_path}")
-                        # 复制到项目目录
-                        os.makedirs("/root/esp32-firmware", exist_ok=True)
-                        import shutil
-                        shutil.copy(bin_path, "/root/esp32-firmware/firmware.bin")
-                        print(f"[OTA] .bin ready at /root/esp32-firmware/firmware.bin")
-                        break
+            runs = json.loads(resp.read())["workflow_runs"]
+            if not runs: return
+            run = runs[0]
+            run_id = run["id"]
+            if run_id <= _last_run_id: return
+            _last_run_id = run_id
+            print(f"[OTA] New build #{run['run_number']} detected")
+
+        # 取 artifact
+        art_url = f"https://api.github.com/repos/{_gh_repo}/actions/runs/{run_id}/artifacts"
+        req = urllib.request.Request(art_url, headers={"User-Agent": "Hermes-ECS", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            arts = json.loads(resp.read())["artifacts"]
+            for art in arts:
+                if art["name"] == "firmware-bin":
+                    dl_url = art["archive_download_url"]
+                    req2 = urllib.request.Request(dl_url, headers={"User-Agent": "Hermes-ECS", "Accept": "application/vnd.github+json"})
+                    with urllib.request.urlopen(req2, timeout=30) as zip_resp:
+                        zip_path = f"/tmp/firmware-{run_id}.zip"
+                        with open(zip_path, "wb") as f:
+                            f.write(zip_resp.read())
+                        import zipfile
+                        with zipfile.ZipFile(zip_path) as zf:
+                            os.makedirs("/root/esp32-firmware", exist_ok=True)
+                            zf.extract("firmware.bin", "/root/esp32-firmware/")
+                        os.remove(zip_path)
+                        print(f"[OTA] .bin ready (build #{run['run_number']})")
+                    break
     except Exception as e:
-        # GitHub API 限流时静默忽略
         pass
 
 async def _animate_dots():
