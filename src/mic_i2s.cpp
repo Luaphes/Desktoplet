@@ -11,15 +11,16 @@ void MicI2S::init() {}
 void MicI2S::start() {
     if (_running) return;
 
+    // 用 v24 已验证的参数（能出音量条）
     i2s_config_t i2s_cfg = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate = 16000,
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-        .intr_alloc_flags = 0,
-        .dma_buf_count = 1,
-        .dma_buf_len = 4,    // 极微量 DMA：4 样本 = 8 字节缓冲
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 2,
+        .dma_buf_len = 8,
         .use_apll = false,
         .tx_desc_auto_clear = false,
         .fixed_mclk = 0
@@ -45,10 +46,8 @@ void MicI2S::start() {
 }
 
 void MicI2S::stop() {
-    if (_running) {
-        i2s_driver_uninstall(I2S_PORT);
-        _running = false;
-    }
+    // 不卸驱动（卸了会炸 WiFi），I2S 保持静默
+    _running = false;
 }
 
 bool MicI2S::isRunning() {
@@ -58,7 +57,6 @@ bool MicI2S::isRunning() {
 int MicI2S::readData(int16_t *buffer, int samples) {
     if (!_running) return 0;
     size_t bytes_read = 0;
-    // 每次读 4 样本（~250μs DMA），给 WiFi 留 29.75ms
     int to_read = (samples > 4) ? 4 : samples;
     esp_err_t err = i2s_read(I2S_PORT, buffer, to_read * sizeof(int16_t), &bytes_read, pdMS_TO_TICKS(10));
     if (err != ESP_OK) return 0;
