@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <WiFi.h>
 #include "pins.h"
 #include "wifi_manager.h"
 #include "websocket.h"
@@ -129,10 +128,6 @@ void handleWSMessage(const String &msg) {
     // 麦克风测试
     if (type == "mic_test") {
         int duration = doc["duration"] | 5;
-        // 关 WiFi 释放 GDMA，I2S 独占不冲突
-        WiFi.disconnect(false); // 保留 NVS 凭据
-        WiFi.mode(WIFI_OFF);
-        delay(10);
         mic.start();
         _micTestEnd = millis() + (duration * 1000UL);
         display.chineseCentered("MIC 测试", 20);
@@ -249,12 +244,9 @@ void loop() {
     if (_micTestEnd > 0) {
         unsigned long now = millis();
         if (now >= _micTestEnd) {
-            // 测试结束：关 I2S，开 WiFi
+            // 测试结束
             _micTestEnd = 0;
-            mic.stop();
-            WiFi.mode(WIFI_STA);
-            WiFi.begin(); // 用 NVS 存的上次凭据重连
-            display.chineseCentered("重连 WiFi...", 32);
+            display.chineseCentered("恢复连网...", 32);
         } else {
             int n = mic.readData(_micBuf, 128);
             if (n > 0) {
