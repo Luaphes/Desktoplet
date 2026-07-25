@@ -112,10 +112,6 @@ async def _check_cmd_file():
     if not ESP32:
         return
     try:
-        mtime = os.path.getmtime(CMD_FILE)
-        if mtime <= _last_cmd_mtime:
-            return
-        _last_cmd_mtime = mtime
         with open(CMD_FILE) as f:
             msg = f.read().strip()
         if msg:
