@@ -136,6 +136,34 @@ void OLEDDisplay::bootAnimation() {
     delay(2000);
 }
 
+void OLEDDisplay::drawVolumeBar(int level) {
+    if (!_display) return;
+    if (level < 0) level = 0;
+    if (level > 100) level = 100;
+    _display->firstPage();
+    do {
+        // Title
+        _display->setFont(u8g2_font_ncenB08_tr);
+        _display->setCursor(0, 12);
+        _display->print("MIC Test");
+
+        // Bar frame (10,24) ~ (118,40) = 108x16
+        int barX = 10, barY = 24, barW = 108, barH = 16;
+        _display->drawFrame(barX, barY, barW, barH);
+
+        // Filled portion
+        int fillW = (level * (barW - 4)) / 100;
+        if (fillW > 0)
+            _display->drawBox(barX + 2, barY + 2, fillW, barH - 4);
+
+        // Percentage text below
+        char pct[8];
+        snprintf(pct, sizeof(pct), "%d%%", level);
+        _display->setCursor((SCREEN_WIDTH - _display->getStrWidth(pct)) / 2, 56);
+        _display->print(pct);
+    } while (_display->nextPage());
+}
+
 void OLEDDisplay::displayOn() {
     if (_display) _display->setPowerSave(0);
 }

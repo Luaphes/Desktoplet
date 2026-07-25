@@ -21,6 +21,10 @@ static unsigned long lastWiFiCheck = 0;
 static unsigned long _connectStart = 0;
 static bool otaInProgress = false;
 
+// 麦克风测试状态
+static unsigned long _micTestEnd = 0;
+static int16_t _micBuf[128]; // 16kHz 采样缓冲
+
 // ---------- 处理收到的 WebSocket 消息 ----------
 void handleWSMessage(const String &msg) {
     JsonDocument doc;
@@ -119,6 +123,16 @@ void handleWSMessage(const String &msg) {
             }
             display.showMulti(lineBuf, count);
         }
+        return;
+    }
+
+    // 麦克风测试
+    if (type == "mic_test") {
+        int duration = doc["duration"] | 5;
+        mic.start();
+        _micTestEnd = millis() + (duration * 1000UL);
+        display.chineseCentered("MIC 测试", 20);
+        display.chineseCentered("吹口气看看", 48);
         return;
     }
 }
@@ -225,6 +239,33 @@ void loop() {
         display.showCentered("Reset WiFi...", 20, 1);
         delay(500);
         wifiManager.clearAndRestart();
+    }
+
+    // ---------- 麦克风测试 ----------
+    if (_micTestEnd > 0) {
+        unsigned long now = millis();
+        if (now >= _micTestEnd) {
+            // 测试结束
+            _micTestEnd = 0;
+            mic.stop();
+            display.showStatus("WiFi OK", wifiManager.getLocalIP());
+        } else {
+            int n = mic.readData(_micBuf, 128);
+            if (n > 0) {
+                // 计算 RMS 均方根振幅
+                int32_t sum = 0;
+                for (int i = 0; i < n; i++) {
+                    int32_t v = _micBuf[i];
+                    sum += (v * v) / n;
+                }
+                int rms = (int)sqrt(sum);
+                // 映射到 0-100 (INMP441 安静 ~200, 正常说话 ~3000-8000)
+                int level = constrain(map(rms, 0, 15000, 0, 100), 0, 100);
+                display.drawVolumeBar(level);
+            }
+        }
+        delay(30); // ~30fps OTA 时也够
+        return;    // 测试期间跳过其他循环
     }
 
     delay(10);

@@ -27,6 +27,8 @@ public:
         uint8_t size;  // 1=small, 2=large
     };
     void showMulti(const Line *lines, uint8_t count, uint8_t startY = 12);
+    // 音量条
+    void drawVolumeBar(int level); // level: 0-100
     // 基础
     void clear();
     void bootAnimation();
