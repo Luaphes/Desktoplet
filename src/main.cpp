@@ -248,7 +248,7 @@ void loop() {
             _micTestEnd = 0;
             display.chineseCentered("恢复连网...", 32);
         } else {
-            int n = mic.readData(_micBuf, 16);
+            int n = mic.readData(_micBuf, 4);
             if (n > 0) {
                 // 计算平均振幅（简版，不用 sqrt）
                 int32_t sum = 0;
