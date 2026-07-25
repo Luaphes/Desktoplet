@@ -1,78 +1,70 @@
 #!/usr/bin/env python3
 """
-WebSocket 服务端（Mac 开发用）
-用法: python3 ws_server.py
-监听 0.0.0.0:8765，等待 ESP32 连接。
-
-终端输入命令:
-  显示: <文字>  → 推送到 OLED 显示
-  状态: <文字>  → 显示状态行
-  清屏          → 清空 OLED
-  ota <端口>     → 在当前目录启动 HTTP 服务并推送 OTA
-  JSON字符串    → 原样发送
+WebSocket 服务端（多 ESP32 支持）
+监听 0.0.0.0:8765，支持多台 ESP32 同时在线。
+命令文件支持 target 字段指定单台设备。
 """
-
 import asyncio
 import websockets
 import json
-import subprocess
-import socket
 import os
 import sys
 import time
 
-ESP32 = None
+ESP32s = {}
+_next_id = 0
 OTA_PORT = 23717
 CMD_FILE = "/tmp/ws_cmd.json"
-_last_cmd_mtime = 0
 _last_btn_time = 0
 _is_restored = False
 _cmd_queue = []
+_default_display_msg = ""
+_waiting_loop = False
 
-async def _safe_send(msg):
-    """Send message to ESP32, queue on disconnect instead of crashing."""
-    global ESP32
-    if not ESP32:
-        _cmd_queue.append(msg)
-        return
-    try:
-        await ESP32.send(msg)
-    except websockets.exceptions.ConnectionClosed:
-        print("[-] ESP32 disconnected, queueing message")
-        ESP32 = None
-        _cmd_queue.append(msg)
-
-async def _update_display(msg):
-    global _last_display_msg, ESP32
-    _last_display_msg = msg
-    if ESP32:
-        await _safe_send(msg)
-        print(f"[CMD] {msg}")
+async def _safe_send(msg, target=None):
+    """发送消息到指定或全部 ESP32。断连则入队。"""
+    global ESP32s, _cmd_queue
+    if target:
+        ws = ESP32s.get(target)
+        if not ws:
+            _cmd_queue.append({"msg": msg, "target": target})
+            return
+        try:
+            await ws.send(msg)
+        except websockets.exceptions.ConnectionClosed:
+            del ESP32s[target]
+            _cmd_queue.append({"msg": msg, "target": target})
     else:
-        _cmd_queue.append(msg)
+        for tid, ws in list(ESP32s.items()):
+            try:
+                await ws.send(msg)
+            except websockets.exceptions.ConnectionClosed:
+                del ESP32s[tid]
+                _cmd_queue.append({"msg": msg, "target": tid})
+
+async def _update_display(msg, target=None):
+    if ESP32s:
+        await _safe_send(msg, target)
+        tgt = f" -> {target}" if target else " -> all"
+        print(f"[CMD]{tgt} {msg}")
+    else:
+        _cmd_queue.append({"msg": msg, "target": target})
         print(f"[QUEUE] {msg}")
 
-_last_run_id = 0
-
 async def _animate_dots():
-    """等待动画：三个点轮流闪烁"""
-    global _waiting_loop, ESP32
+    global _waiting_loop
     dots = ["   ", ".  ", ".. ", "..."]
     i = 0
-    while _waiting_loop and ESP32:
-        try:
-            text = f"Hermes is waiting{dots[i % 4]}"
-            await _safe_send(json.dumps({"type": "display", "text": text}))
-            i += 1
-            await asyncio.sleep(0.5)
-        except Exception:
-            break
+    while _waiting_loop and ESP32s:
+        text = f"Hermes is waiting{dots[i % 4]}"
+        await _safe_send(json.dumps({"type": "display", "text": text}))
+        i += 1
+        await asyncio.sleep(0.5)
 
 async def _set_waiting():
-    global _default_display_msg, _waiting_loop
-    _waiting_loop = False  # 先停旧的
+    global _waiting_loop, _is_restored
+    _waiting_loop = False
     await asyncio.sleep(0.1)
-    _default_display_msg = _last_display_msg
     _waiting_loop = True
     _is_restored = False
     asyncio.create_task(_animate_dots())
@@ -80,97 +72,70 @@ async def _set_waiting():
 async def _restore_display():
     global _waiting_loop, _is_restored
     if _is_restored:
-        return  # 已在恢复态，不重复播
+        return
     _waiting_loop = False
     await asyncio.sleep(0.1)
-    # 播放 HERMES 动画（大头版）
     boot = ["H", "HE", "HER", "HERM", "HERME", "HERMES"]
     for ch in boot:
-        if not ESP32:
+        if not ESP32s:
             break
         await _safe_send(json.dumps({"type": "display", "text": ch}))
         await asyncio.sleep(0.25)
-    # 停在 HERMES，不切回 Codex
-    _default_display_msg = ""
     _is_restored = True
 
-async def _restore_animation():
-    """ESP32 重连时播放，仅当不在恢复态时"""
-    global _is_restored
-    if _is_restored:
-        return
-    boot = ["H", "HE", "HER", "HERM", "HERME", "HERMES"]
-    for ch in boot:
-        if not ESP32:
-            break
-        await _safe_send(json.dumps({"type": "display", "text": ch}))
-        await asyncio.sleep(0.2)
-    await asyncio.sleep(2)
-
 async def _check_cmd_file():
-    global _last_cmd_mtime, ESP32
-    if not ESP32:
+    global _last_btn_time
+    if not ESP32s:
         return
     try:
         with open(CMD_FILE) as f:
             msg = f.read().strip()
         if msg:
-            # 支持内部命令
             try:
                 cmd = json.loads(msg)
                 if isinstance(cmd, dict):
-                    # 动画帧序列：自动按 delay 逐帧推送
+                    target = cmd.pop("target", None)
                     if cmd.get("command") == "frames" and "frames" in cmd:
                         loop = cmd.get("loop", 1)
                         for _ in range(loop):
                             for frame in cmd["frames"]:
-                                await _safe_send(json.dumps(frame))
+                                ft = frame.pop("target", target)
+                                await _safe_send(json.dumps(frame), ft)
                                 await asyncio.sleep(cmd.get("delay", 0.15))
-                        os.remove(CMD_FILE)
-                        return
+                        os.remove(CMD_FILE); return
                     if cmd.get("command") == "waiting":
-                        await _set_waiting()
-                        os.remove(CMD_FILE)
-                        return
+                        await _set_waiting(); os.remove(CMD_FILE); return
                     elif cmd.get("command") == "restore":
-                        await _restore_display()
-                        os.remove(CMD_FILE)
-                        return
+                        await _restore_display(); os.remove(CMD_FILE); return
             except json.JSONDecodeError:
                 pass
-            await _update_display(msg)
+            await _update_display(msg, target)
             os.remove(CMD_FILE)
     except (FileNotFoundError, OSError):
         pass
 
-def get_local_ip():
-    """获取 Mac 局域网 IP"""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-    except Exception:
-        ip = "127.0.0.1"
-    finally:
-        s.close()
-    return ip
-
 async def handler(websocket):
-    global ESP32
-    ESP32 = websocket
-    print(f"[+] ESP32 connected from {websocket.remote_address}")
-
-    # 重连时发队列中的命令
-    while _cmd_queue:
-        msg = _cmd_queue.pop(0)
-        await _safe_send(msg)
-        print(f"[FLUSH] {msg}")
-
+    global _next_id, _cmd_queue
+    cid = str(_next_id)
+    _next_id += 1
+    ESP32s[cid] = websocket
+    print(f"[+] ESP32 {cid} from {websocket.remote_address}")
+    remaining = []
+    for item in _cmd_queue:
+        tgt = item.get("target")
+        if tgt is None or tgt == cid:
+            try:
+                await websocket.send(item["msg"])
+                print(f"[FLUSH] {item['msg']}")
+            except:
+                remaining.append(item)
+        else:
+            remaining.append(item)
+    _cmd_queue = remaining
     try:
         async for message in websocket:
             data = json.loads(message)
-            print(f"[ESP32] {json.dumps(data, ensure_ascii=False)}")
-            # 收到按钮事件时恢复显示（带冷却）
+            print(f"[ESP32:{cid}] {json.dumps(data, ensure_ascii=False)}")
             if data.get("type") == "btn_click":
                 now = time.time()
                 if now - _last_btn_time > 3:
@@ -179,91 +144,55 @@ async def handler(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
-        ESP32 = None
-        print("[-] ESP32 disconnected")
+        ESP32s.pop(cid, None)
+        print(f"[-] ESP32 {cid} disconnected")
 
 async def stdin_forward():
-    """从终端输入消息推给 ESP32"""
-    loop = asyncio.get_event_loop()
-    http_proc = None
-
+    loop = asyncio.get_running_loop()
     while True:
         line = await loop.run_in_executor(None, input)
         if line:
-            # 支持 frames 动画命令
             try:
                 cmd = json.loads(line)
                 if isinstance(cmd, dict) and cmd.get("command") == "frames":
                     for frame in cmd["frames"]:
                         await _safe_send(json.dumps(frame))
                         await asyncio.sleep(cmd.get("delay", 0.15))
-                    print("[SENT] frames sequence")
-                    continue
+                    print("[SENT] frames sequence"); continue
             except json.JSONDecodeError:
                 pass
+            if line == "list":
+                print(f"Connected: {list(ESP32s.keys())}")
+                continue
             await _update_display(line)
+            if line.startswith("ota"):
+                port = OTA_PORT if ' ' not in line else int(line.split()[1])
+                subprocess.Popen(["python3", "-m", "http.server", str(port)])
+                await _safe_send(json.dumps({"type": "ota", "url": f"http://118.31.46.156:{port}/firmware.bin"}))
 
-        if line.startswith("ota"):
-            # 启动 HTTP 服务提供 .bin 下载
-            if http_proc:
-                http_proc.terminate()
-                print("[HTTP] 旧服务已停止")
-
-            http_proc = subprocess.Popen(
-                ["python3", "-m", "http.server", str(OTA_PORT)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            ip = get_local_ip()
-            url = f"http://{ip}:{OTA_PORT}/firmware.bin"
-            msg = json.dumps({"type": "ota", "url": url})
-            print(f"[OTA] HTTP 服务已启动: {url}")
-
-            if ESP32:
-                try:
-                    await _safe_send(msg)
-                    print(f"[SENT] {msg}")
-                except Exception as e:
-                    print(f"[ERR] {e}")
-            continue
-
-        if line.startswith("显示:"):
-            text = line[3:].strip()
-            msg = json.dumps({"type": "display", "text": text}, ensure_ascii=False)
-        elif line.startswith("状态:"):
-            text = line[3:].strip()
-            msg = json.dumps({"type": "status", "line1": text}, ensure_ascii=False)
-        elif line.startswith("清屏"):
-            msg = json.dumps({"type": "clear"})
-        else:
-            msg = line
-
-        try:
-            if ESP32:
-                await _safe_send(msg)
-                print(f"[SENT] {msg}")
-            else:
-                print("[!] ESP32 未连接")
-        except Exception as e:
-            print(f"[ERR] {e}")
+def get_local_ip():
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except:
+        return "127.0.0.1"
+    finally:
+        s.close()
 
 async def main():
     print("WebSocket 服务端启动，等待 ESP32 连接...")
     print(f"OTA 端口: {OTA_PORT}")
-    print()
-
     async with websockets.serve(handler, "0.0.0.0", 8765, ping_interval=15, ping_timeout=10):
-        # 有终端交互时用 stdin_forward，后台模式则只等待
         try:
             if sys.stdin.isatty():
                 await stdin_forward()
             else:
-                # 后台模式：监控命令文件
                 while True:
                     await _check_cmd_file()
                     await asyncio.sleep(0.1)
         except (EOFError, OSError):
-            # 无终端时直接挂起等待
             while True:
                 await asyncio.sleep(60)
 

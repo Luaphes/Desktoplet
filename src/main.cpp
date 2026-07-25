@@ -76,7 +76,12 @@ void handleWSMessage(const String &msg) {
     if (type == "chinese") {
         String text = doc["text"] | "";
         if (text.length() > 0) {
-            display.chineseCentered(text, 20);
+            int x = doc["x"] | -1;
+            int y = doc["y"] | 20;
+            if (x >= 0)
+                display.showChinese(text, x, y);
+            else
+                display.chineseCentered(text, y);
         }
         return;
     }

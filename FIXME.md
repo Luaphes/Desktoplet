@@ -28,6 +28,12 @@
   每次功能推送前 bump
   当前 v18 → 下次 v19
 
+## P1
+
+- [ ] **多 ESP32 场景下的识别** (`src/websocket.cpp` + `ws_server.py`)
+  连接时发 `{"type":"identify","mac":"C8:F0:9E:XX:XX:XX"}`
+  服务端用 MAC 区分设备，重启后不乱，可给每台命名
+
 ## 待验证
 
 - [ ] OTA 全链路（GitHub Actions → Release → OTA 指令 → ESP32 下载更新）
