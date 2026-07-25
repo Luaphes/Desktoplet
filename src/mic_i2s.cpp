@@ -4,6 +4,11 @@
 
 static const i2s_port_t I2S_PORT = I2S_NUM_0;
 
+// I2S0 基址（不依赖任何头文件）
+#define I2S_BASE    0x60042000
+#define I2S_CONF    (*(volatile uint32_t *)(I2S_BASE + 0x00))
+#define I2S_FIFO    (*(volatile uint32_t *)(I2S_BASE + 0x40))
+
 MicI2S mic;
 
 void MicI2S::init() {}
@@ -11,16 +16,16 @@ void MicI2S::init() {}
 void MicI2S::start() {
     if (_running) return;
 
-    // 用 v24 已验证的参数（能出音量条）
+    // 不分配 DMA，只配时钟和引脚
     i2s_config_t i2s_cfg = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate = 16000,
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL3,  // 低优先级，WiFi 先走
-        .dma_buf_count = 2,
-        .dma_buf_len = 8,
+        .intr_alloc_flags = 0,
+        .dma_buf_count = 0,
+        .dma_buf_len = 0,
         .use_apll = false,
         .tx_desc_auto_clear = false,
         .fixed_mclk = 0
@@ -42,12 +47,22 @@ void MicI2S::start() {
         return;
     }
 
+    // 启动 I2S RX 状态机（配好时钟后才出数据）
+    err = i2s_start(I2S_PORT);
+    if (err != ESP_OK) {
+        i2s_driver_uninstall(I2S_PORT);
+        return;
+    }
+
     _running = true;
 }
 
 void MicI2S::stop() {
-    // 不卸驱动（卸了会炸 WiFi），I2S 保持静默
-    _running = false;
+    if (_running) {
+        i2s_stop(I2S_PORT);
+        i2s_driver_uninstall(I2S_PORT);
+        _running = false;
+    }
 }
 
 bool MicI2S::isRunning() {
@@ -56,9 +71,13 @@ bool MicI2S::isRunning() {
 
 int MicI2S::readData(int16_t *buffer, int samples) {
     if (!_running) return 0;
-    size_t bytes_read = 0;
-    int to_read = (samples > 4) ? 4 : samples;
-    esp_err_t err = i2s_read(I2S_PORT, buffer, to_read * sizeof(int16_t), &bytes_read, pdMS_TO_TICKS(10));
-    if (err != ESP_OK) return 0;
-    return bytes_read / sizeof(int16_t);
+
+    int count = 0;
+    while (count < samples) {
+        // 直接读 FIFO，不计校验（C3 状态寄存器偏移不确定）
+        uint32_t val = I2S_FIFO;
+        buffer[count++] = (int16_t)(val & 0xFFFF);
+        delayMicroseconds(50);
+    }
+    return count;
 }
