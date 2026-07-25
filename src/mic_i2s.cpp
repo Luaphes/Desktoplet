@@ -1,9 +1,13 @@
 #include "mic_i2s.h"
 #include "pins.h"
 #include <driver/i2s.h>
-#include <hal/i2s_ll.h>
 
 static const i2s_port_t I2S_PORT = I2S_NUM_0;
+
+// ESP32-C3 I2S0 寄存器偏移（不依赖任何头文件结构体）
+#define I2S0_BASE      0x60042000
+#define I2S0_STATUS    (*(volatile uint32_t *)(I2S0_BASE + 0x04))
+#define I2S0_RX_FIFO   (*(volatile uint32_t *)(I2S0_BASE + 0x40))
 
 MicI2S mic;
 
@@ -56,21 +60,17 @@ bool MicI2S::isRunning() {
     return _running;
 }
 
-// 轮询 I2S RX FIFO，不走 DMA
-// 使用 HAL LL 函数，自动适配各芯片的寄存器布局
 int MicI2S::readData(int16_t *buffer, int samples) {
     if (!_running) return 0;
 
-    i2s_dev_t *hw = (i2s_dev_t *)I2S0_BASE_ADDR;
     int count = 0;
-
     while (count < samples) {
-        if (i2s_ll_rx_get_fifo_cnt(hw) > 0) {
-            buffer[count++] = (int16_t)(i2s_ll_rx_read_fifo(hw) & 0xFFFF);
+        // Status reg bits 16-20 = RX_FIFO_CNT (0-16)
+        if (((I2S0_STATUS >> 16) & 0x1F) > 0) {
+            buffer[count++] = (int16_t)(I2S0_RX_FIFO & 0xFFFF);
         } else {
             delayMicroseconds(50);
         }
     }
-
     return count;
 }
