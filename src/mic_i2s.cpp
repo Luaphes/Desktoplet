@@ -1,22 +1,17 @@
 #include "mic_i2s.h"
 #include "pins.h"
 #include <driver/i2s.h>
-#include <soc/i2s_struct.h>
+#include <hal/i2s_ll.h>
 
 static const i2s_port_t I2S_PORT = I2S_NUM_0;
 
 MicI2S mic;
 
-void MicI2S::init() {
-    // 延迟初始化，start() 时才装
-}
+void MicI2S::init() {}
 
 void MicI2S::start() {
     if (_running) return;
 
-    // I2S 配置：配时钟引脚，但不跑 DMA
-    // dma_buf_count = 1, dma_buf_len = 2 是驱动的最低要求
-    // readData 不走 i2s_read，而是直接轮询 FIFO 寄存器
     i2s_config_t i2s_cfg = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate = 16000,
@@ -25,7 +20,7 @@ void MicI2S::start() {
         .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
         .intr_alloc_flags = 0,
         .dma_buf_count = 1,
-        .dma_buf_len = 2,    // 仅 4 字节，驱动安装所需的最小值
+        .dma_buf_len = 2,
         .use_apll = false,
         .tx_desc_auto_clear = false,
         .fixed_mclk = 0
@@ -38,7 +33,6 @@ void MicI2S::start() {
         .data_in_num = MIC_SD
     };
 
-    // 安装驱动（配时钟、GPIO矩阵、复位外设，但 DMA 极小）
     esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_cfg, 0, NULL);
     if (err != ESP_OK) return;
 
@@ -62,19 +56,18 @@ bool MicI2S::isRunning() {
     return _running;
 }
 
-// 直接轮询 I2S RX FIFO 寄存器，不走 DMA
-// 这样 I2S 和 WiFi 各用各的资源，不抢 GDMA 通道
+// 轮询 I2S RX FIFO，不走 DMA
+// 使用 HAL LL 函数，自动适配各芯片的寄存器布局
 int MicI2S::readData(int16_t *buffer, int samples) {
     if (!_running) return 0;
 
+    i2s_dev_t *hw = (i2s_dev_t *)I2S0_BASE_ADDR;
     int count = 0;
+
     while (count < samples) {
-        // status.rx_fifo_cnt: RX FIFO 中 32-bit 字数（0-16）
-        if (I2S0->status.rx_fifo_cnt > 0) {
-            // 从 FIFO 读一个字，取低 16 位
-            buffer[count++] = (int16_t)(I2S0->data_rx_reg & 0xFFFF);
+        if (i2s_ll_rx_get_fifo_cnt(hw) > 0) {
+            buffer[count++] = (int16_t)(i2s_ll_rx_read_fifo(hw) & 0xFFFF);
         } else {
-            // 没数据时不空转，让出 CPU 给 WiFi
             delayMicroseconds(50);
         }
     }
