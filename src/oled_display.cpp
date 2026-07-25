@@ -95,7 +95,7 @@ void OLEDDisplay::chineseCentered(const String &text, int y) {
                 } else {
                     i += 1; continue;
                 }
-                w += u8g2_GetGlyphWidth(_display, cp);
+                w += _display->getGlyphWidth(cp);
             }
         }
         _display->setCursor((SCREEN_WIDTH - w) / 2, y);
