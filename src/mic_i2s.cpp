@@ -23,8 +23,8 @@ void MicI2S::start() {
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
         .intr_alloc_flags = 0,
-        .dma_buf_count = 1,
-        .dma_buf_len = 2,
+        .dma_buf_count = 0,
+        .dma_buf_len = 0,      // 不启动 DMA，FIFO 靠寄存器轮询
         .use_apll = false,
         .tx_desc_auto_clear = false,
         .fixed_mclk = 0
@@ -65,12 +65,10 @@ int MicI2S::readData(int16_t *buffer, int samples) {
 
     int count = 0;
     while (count < samples) {
-        // Status reg bits 16-20 = RX_FIFO_CNT (0-16)
-        if (((I2S0_STATUS >> 16) & 0x1F) > 0) {
-            buffer[count++] = (int16_t)(I2S0_RX_FIFO & 0xFFFF);
-        } else {
-            delayMicroseconds(50);
-        }
+        // 直接从 FIFO 读，不检查计数（C3 寄存器布局未知）
+        int16_t sample = (int16_t)(I2S0_RX_FIFO & 0xFFFF);
+        buffer[count++] = sample;
+        delayMicroseconds(50);
     }
     return count;
 }
