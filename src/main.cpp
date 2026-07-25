@@ -245,9 +245,8 @@ void loop() {
     if (_micTestEnd > 0) {
         unsigned long now = millis();
         if (now >= _micTestEnd) {
-            // 测试结束
+            // 测试结束：不卸 I2S 驱动（卸了会炸 WiFi）
             _micTestEnd = 0;
-            mic.stop();
             display.showStatus("WiFi OK", wifiManager.getLocalIP());
         } else {
             int n = mic.readData(_micBuf, 128);
