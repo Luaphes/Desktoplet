@@ -69,11 +69,10 @@ int MicI2S::readData(int16_t *buffer, int samples) {
 
     int count = 0;
     while (count < samples) {
-        // state_reg bits 16-20: RX FIFO 中 32-bit 字数（0-16）
-        int fifo_cnt = (I2S0.state_reg >> 16) & 0x1F;
-        if (fifo_cnt > 0) {
+        // status.rx_fifo_cnt: RX FIFO 中 32-bit 字数（0-16）
+        if (I2S0->status.rx_fifo_cnt > 0) {
             // 从 FIFO 读一个字，取低 16 位
-            buffer[count++] = (int16_t)(I2S0.data_rx_reg & 0xFFFF);
+            buffer[count++] = (int16_t)(I2S0->data_rx_reg & 0xFFFF);
         } else {
             // 没数据时不空转，让出 CPU 给 WiFi
             delayMicroseconds(50);
