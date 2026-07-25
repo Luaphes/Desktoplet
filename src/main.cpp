@@ -249,17 +249,18 @@ void loop() {
             _micTestEnd = 0;
             display.showStatus("WiFi OK", wifiManager.getLocalIP());
         } else {
-            int n = mic.readData(_micBuf, 128);
+            int n = mic.readData(_micBuf, 32);
             if (n > 0) {
-                // 计算 RMS 均方根振幅
+                // 计算平均振幅（简版，不用 sqrt）
                 int32_t sum = 0;
                 for (int i = 0; i < n; i++) {
                     int32_t v = _micBuf[i];
-                    sum += (v * v) / n;
+                    if (v < 0) v = -v;
+                    sum += v;
                 }
-                int rms = (int)sqrt(sum);
-                // 映射到 0-100 (INMP441 安静 ~200, 正常说话 ~3000-8000)
-                int level = constrain(map(rms, 0, 15000, 0, 100), 0, 100);
+                int avg = sum / n;
+                // 映射到 0-100 (INMP441 安静 ~50-200, 正常说话 ~2000-6000)
+                int level = constrain(map(avg, 0, 5000, 0, 100), 0, 100);
                 display.drawVolumeBar(level);
             }
         }
