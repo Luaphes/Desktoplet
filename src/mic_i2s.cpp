@@ -18,7 +18,7 @@ void MicI2S::start() {
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL3,  // 低优先级，WiFi 先走
         .dma_buf_count = 2,
         .dma_buf_len = 8,
         .use_apll = false,
