@@ -1,8 +1,8 @@
 #include "ota.h"
 #include <string>
+#include <cstring>
 #include <esp_https_ota.h>
 #include <esp_log.h>
-#include <string.h>
 
 static const char *TAG = "OTA";
 
@@ -11,15 +11,14 @@ void OTAManager::init() {}
 void OTAManager::startOTA(const std::string &url) {
     ESP_LOGI(TAG, "Starting OTA from: %s", url.c_str());
 
-    esp_http_client_config_t http_cfg = {
-        .url = url.c_str(),
-        .timeout_ms = 10000,
-        .keep_alive_enable = true,
-    };
+    // Zero-init all structs to suppress ESP-IDF 6.x -Werror=missing-field-initializers
+    esp_http_client_config_t http_cfg = {};
+    http_cfg.url = url.c_str();
+    http_cfg.timeout_ms = 10000;
+    http_cfg.keep_alive_enable = true;
 
-    esp_https_ota_config_t ota_cfg = {
-        .http_config = &http_cfg,
-    };
+    esp_https_ota_config_t ota_cfg = {};
+    ota_cfg.http_config = &http_cfg;
 
     esp_err_t err = esp_https_ota(&ota_cfg);
     if (err == ESP_OK) {
@@ -31,7 +30,7 @@ void OTAManager::startOTA(const std::string &url) {
 }
 
 bool OTAManager::isUpdating() {
-    return false; // synchronous OTA, blocks until done
+    return false;
 }
 
 OTAManager otaManager;

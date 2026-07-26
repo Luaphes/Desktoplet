@@ -1,9 +1,11 @@
 #include "mic_i2s.h"
 #include "pins.h"
 #include <driver/i2s_std.h>
-#include <freertos/FreeRTOS.h>  // for pdMS_TO_TICKS
+#include <freertos/FreeRTOS.h>
+#include <esp_log.h>
 
 static i2s_chan_handle_t rx_chan = NULL;
+static const char *TAG = "I2S";
 
 MicI2S mic;
 
@@ -12,11 +14,10 @@ void MicI2S::init() {}
 void MicI2S::start() {
     if (rx_chan) return;
 
-    // 1. 通道配置
+    // 1. 通道配置 (ESP-IDF 6.x: id + role + dir, 无 comm)
     i2s_chan_config_t chan_cfg = {
         .id = I2S_NUM_0,
         .role = I2S_ROLE_MASTER,
-        .comm = I2S_COMM_MODE_STD,
         .dir = I2S_DIR_RX,
     };
     esp_err_t err = i2s_new_channel(&chan_cfg, NULL, &rx_chan);
@@ -24,18 +25,14 @@ void MicI2S::start() {
 
     // 2. STD 模式配置
     i2s_std_config_t std_cfg = {
-        .clk_cfg = {
-            .sample_rate_hz = 16000,
-            .clk_src = I2S_CLK_SRC_DEFAULT,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-        },
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
-            .bclk = MIC_SCK,
-            .ws = MIC_WS,
+            .bclk = (gpio_num_t)MIC_SCK,
+            .ws = (gpio_num_t)MIC_WS,
             .dout = I2S_GPIO_UNUSED,
-            .din = MIC_SD,
+            .din = (gpio_num_t)MIC_SD,
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
@@ -45,14 +42,15 @@ void MicI2S::start() {
     };
     err = i2s_channel_init_std_mode(rx_chan, &std_cfg);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "init_std failed: %d", err);
         i2s_del_channel(rx_chan);
         rx_chan = NULL;
         return;
     }
 
-    // 3. 启用
     err = i2s_channel_enable(rx_chan);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "enable failed: %d", err);
         i2s_del_channel(rx_chan);
         rx_chan = NULL;
     }
