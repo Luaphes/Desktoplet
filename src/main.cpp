@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdlib>
 #include <cJSON.h>
+#include <esp_timer.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
