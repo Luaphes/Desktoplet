@@ -19,7 +19,6 @@ void OTAManager::startOTA(const std::string &url) {
 
     esp_https_ota_config_t ota_cfg = {};
     ota_cfg.http_config = &http_cfg;
-    ota_cfg.bulk_size = 16384;
 
     ESP_LOGI(TAG, "Downloading firmware (1MB)...");
     esp_err_t err = esp_https_ota(&ota_cfg);
