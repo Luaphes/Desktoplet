@@ -89,23 +89,11 @@ static void oled_init_seq() {
 }
 
 static void oled_flush() {
-    // 软件 90°CCW 旋转，补偿 OLED 物理 90°CW 安装
-    static uint8_t _rot[1024];
-    memset(_rot, 0, sizeof(_rot));
-    for (int y = 0; y < 64; y++) {
-        for (int x = 0; x < 128; x++) {
-            int bit = y % 8;
-            if (_fb[(y / 8) * WIDTH + x] & (1 << bit)) {
-                int rx = y, ry = 127 - x;
-                _rot[(ry / 8) * WIDTH + rx] |= (1 << (ry % 8));
-            }
-        }
-    }
     for (int page = 0; page < PAGES; page++) {
         oled_write_cmd(0xB0 + page);
         oled_write_cmd(0x00); // column: 0 (SSD1315)
         oled_write_cmd(0x10);
-        oled_write_data(_rot + page * WIDTH, WIDTH);
+        oled_write_data(_fb + page * WIDTH, WIDTH);
     }
 }
 

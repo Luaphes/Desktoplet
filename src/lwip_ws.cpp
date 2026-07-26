@@ -90,17 +90,18 @@ void LWIP_WS::disconnect() {
 
 bool LWIP_WS::send(const std::string &msg) {
     if (_sock < 0 || !_connected) return false;
-    uint8_t frame[2 + 128] = {0x81};  // FIN + TEXT opcode
     size_t len = msg.size();
-    if (len < 126) {
-        frame[1] = len | 0x80;  // mask bit
-        memcpy(frame + 2, msg.data(), len);
-        // 简单 XOR mask (全零)
-        for (size_t i = 0; i < len; i++) frame[2 + i] ^= 0;
-        int n = ::send(_sock, frame, 2 + len, 0);
-        return n == (int)(2 + len);
-    }
-    return false;
+    if (len >= 126) return false;
+    uint8_t frame[2 + 4 + 126] = {0x81};  // FIN|TEXT
+    frame[1] = len | 0x80;  // mask bit
+    // 生成 4 字节 mask key
+    uint8_t mask[4];
+    for (int i = 0; i < 4; i++) mask[i] = rand() & 0xff;
+    memcpy(frame + 2, mask, 4);
+    for (size_t i = 0; i < len; i++)
+        frame[2 + 4 + i] = msg[i] ^ mask[i % 4];
+    int n = ::send(_sock, frame, 2 + 4 + len, 0);
+    return n == (int)(2 + 4 + len);
 }
 
 static void ws_recv_task(void *arg) {
