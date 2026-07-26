@@ -137,6 +137,7 @@ async def handler(websocket):
             data = json.loads(message)
             print(f"[ESP32:{cid}] {json.dumps(data, ensure_ascii=False)}")
             if data.get("type") == "btn_click":
+                global _last_btn_time
                 now = time.time()
                 if now - _last_btn_time > 3:
                     _last_btn_time = now

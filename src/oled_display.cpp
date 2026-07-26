@@ -75,8 +75,8 @@ static void oled_init_seq() {
     oled_write_cmd(0xA8); oled_write_cmd(0x3F); // mux ratio
     oled_write_cmd(0xD3); oled_write_cmd(0x00); // display offset
     oled_write_cmd(0x40); // start line
-    oled_write_cmd(0xA1); // segment remap
-    oled_write_cmd(0xC8); // COM scan reverse
+    oled_write_cmd(0xA0); // segment: col0=SEG0 (正常)
+    oled_write_cmd(0xC0); // COM scan COM0→COM63 (正常)
     oled_write_cmd(0xDA); oled_write_cmd(0x12); // COM pins
     oled_write_cmd(0x81); oled_write_cmd(0x7F); // contrast
     oled_write_cmd(0xD9); oled_write_cmd(0x22); // pre-charge
@@ -89,13 +89,11 @@ static void oled_init_seq() {
 }
 
 static void oled_flush() {
-    // OLED 物理倒装：framebuffer page 7 → display page 0 (物理底部)
-    for (int disp_page = 0; disp_page < PAGES; disp_page++) {
-        oled_write_cmd(0xB0 + disp_page); // set display page
-        oled_write_cmd(0x00); // lower column start (SSD1315: col 0)
-        oled_write_cmd(0x10); // upper column start
-        int fb_page = PAGES - 1 - disp_page;
-        oled_write_data(_fb + fb_page * WIDTH, WIDTH);
+    for (int page = 0; page < PAGES; page++) {
+        oled_write_cmd(0xB0 + page);
+        oled_write_cmd(0x00); // column: 0 (SSD1315)
+        oled_write_cmd(0x10);
+        oled_write_data(_fb + page * WIDTH, WIDTH);
     }
 }
 
