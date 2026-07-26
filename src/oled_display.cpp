@@ -107,31 +107,21 @@ static void draw_char(int x, int y, char c, bool large) {
     int idx = (unsigned char)c - ' ';
     if (idx > 95) idx = 0;
     const uint8_t *glyph = font8x8[idx];
-    if (large) {
-        // 16x16: double each bit
-        for (int row = 0; row < 8; row++) {
-            uint8_t bits = glyph[row];
-            for (int col = 0; col < 8; col++) {
-                if (bits & (1 << (7 - col))) {
-                    int px = x + col * 2, py = y + row * 2;
-                    for (int dy = 0; dy < 2 && py + dy < HEIGHT; dy++)
-                        for (int dx = 0; dx < 2 && px + dx < WIDTH; dx++) {
-                            int bi = ((py + dy) / 8) * WIDTH + (px + dx);
-                            if (bi < WIDTH * PAGES)
-                                _fb[bi] |= (1 << ((py + dy) % 8));
-                        }
-                }
+    for (int row = 0; row < 8; row++) {
+        int screen_y = y + row;
+        if (screen_y < 0 || screen_y >= HEIGHT) continue;
+        int page = screen_y / 8;
+        int bit = screen_y % 8;
+        uint8_t mask = 1 << bit;
+        for (int col = 0; col < 8; col++) {
+            if (glyph[row] & (1 << (7 - col))) {
+                int px = x + col;
+                if (px >= 0 && px < WIDTH)
+                    _fb[page * WIDTH + px] |= mask;
             }
         }
-    } else {
-        for (int row = 0; row < 8; row++) {
-            if (y + row < 0 || y + row >= HEIGHT) continue;
-            int page = (y + row) / 8;
-            int bit = (y + row) % 8;
-            int offset = page * WIDTH + x;
-            _fb[offset] |= (glyph[row] & (1 << bit)) ? (1 << bit) : 0;
-        }
     }
+    (void)large; // 16x16 not implemented; fallback to 8x8
 }
 
 static void draw_str(int x, int y, const char *s, bool large) {
