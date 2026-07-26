@@ -14,10 +14,12 @@ void MicI2S::init() {}
 void MicI2S::start() {
     if (rx_chan) return;
 
-    // 1. 通道配置 (ESP-IDF 6.x: id + role only)
+    // 1. 通道配置 — 零初始化（ESP-IDF 6.x 要显式清避免 missing-field-initializers）
     i2s_chan_config_t chan_cfg = {
         .id = I2S_NUM_0,
         .role = I2S_ROLE_MASTER,
+        .dma_desc_num = 2,
+        .dma_frame_num = 8,
     };
     esp_err_t err = i2s_new_channel(&chan_cfg, NULL, &rx_chan);
     if (err != ESP_OK || rx_chan == NULL) return;
