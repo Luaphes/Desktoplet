@@ -31,7 +31,7 @@ void WiFiManager::init() {
         if (nvs_get_str(nvs, "pass", buf, &len) == ESP_OK) _pass = buf;
         len = sizeof(buf); memset(buf, 0, sizeof(buf));
         if (nvs_get_str(nvs, "ecs_addr", buf, &len) == ESP_OK) _ecs_addr = buf;
-        uint8_t port = 0;
+        uint16_t port = 0;
         if (nvs_get_u16(nvs, "ecs_port", &port) == ESP_OK) _ecs_port = port;
         nvs_close(nvs);
     }
@@ -62,7 +62,7 @@ void WiFiManager::init() {
 void WiFiManager::startConfigPortal() {
     esp_wifi_stop();
     esp_wifi_set_mode(WIFI_MODE_AP);
-    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+    esp_netif_create_default_wifi_ap();
 
     wifi_config_t ap_cfg = {};
     strcpy((char *)ap_cfg.ap.ssid, "ESP32-Config");
