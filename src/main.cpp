@@ -51,6 +51,9 @@ static int get_json_int(const std::string &json, const std::string &key) {
 }
 
 static void handleWSMessage(const std::string &msg) {
+    // 回显确认收到消息（用于调试 WebSocket）
+    wsClient.send("{\"type\":\"ack\"}");
+    
     std::string type = get_json_str(msg, "type");
     if (type.empty()) return;
 
