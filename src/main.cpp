@@ -14,7 +14,7 @@
 #include "mic_i2s.h"
 #include "ota.h"
 #include "wifi_manager.h"
-#include "websocket.h"
+#include "lwip_ws.h"
 
 static const char *TAG = "Main";
 
@@ -51,8 +51,8 @@ static int get_json_int(const std::string &json, const std::string &key) {
 }
 
 static void handleWSMessage(const std::string &msg) {
-    // 回显确认收到消息（用于调试 WebSocket）
-    wsClient.send("{\"type\":\"ack\"}");
+    // 回显确认收到消息
+    ws.send("{\"type\":\"ack\"}");
     
     std::string type = get_json_str(msg, "type");
     if (type.empty()) return;
@@ -83,8 +83,8 @@ void onWiFiConnected() {
     _state = STATE_RUNNING;
     ESP_LOGI(TAG, "WiFi OK");
     display.showStatus("WiFi OK", wifiManager.getLocalIP().c_str());
-    wsClient.init(wifiManager.getECSAddress(), wifiManager.getECSPort());
-    wsClient.onMessage(handleWSMessage);
+    ws.connect(wifiManager.getECSAddress().c_str(), wifiManager.getECSPort());
+    ws.onMessage(handleWSMessage);
 }
 
 extern "C" void app_main() {
