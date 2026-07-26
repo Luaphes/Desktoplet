@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <string>
-#include <cstdlib>
-#include <cJSON.h>
+#include <cstring>
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
@@ -30,40 +29,49 @@ static State _state = STATE_BOOT;
 static unsigned long _micTestEnd = 0;
 static int16_t _micBuf[128];
 
+// 手写 JSON 字段提取，不依赖任何 JSON 库
+static std::string get_json_str(const std::string &json, const std::string &key) {
+    std::string search = "\"" + key + "\":\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return "";
+    pos += search.length();
+    size_t end = json.find("\"", pos);
+    if (end == std::string::npos) return "";
+    return json.substr(pos, end - pos);
+}
+
+static int get_json_int(const std::string &json, const std::string &key) {
+    std::string search = "\"" + key + "\":";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return 0;
+    pos += search.length();
+    char *end;
+    return strtol(json.c_str() + pos, &end, 10);
+}
+
 static void handleWSMessage(const std::string &msg) {
-    cJSON *doc = cJSON_Parse(msg.c_str());
-    if (!doc) return;
+    std::string type = get_json_str(msg, "type");
+    if (type.empty()) return;
 
-    cJSON *type = cJSON_GetObjectItem(doc, "type");
-    if (!type || !cJSON_IsString(type)) { cJSON_Delete(doc); return; }
-
-    std::string t = type->valuestring;
-
-    if (t == "ota") {
-        cJSON *url = cJSON_GetObjectItem(doc, "url");
-        if (url && cJSON_IsString(url)) {
+    if (type == "ota") {
+        std::string url = get_json_str(msg, "url");
+        if (!url.empty()) {
             _state = STATE_OTA;
-            ESP_LOGI(TAG, "OTA from: %s", url->valuestring);
-            otaManager.startOTA(url->valuestring);
+            ESP_LOGI(TAG, "OTA from: %s", url.c_str());
+            otaManager.startOTA(url);
         }
-    } else if (t == "display") {
-        cJSON *text = cJSON_GetObjectItem(doc, "text");
-        if (text && cJSON_IsString(text))
-            ESP_LOGI(TAG, "display: %s", text->valuestring);
-    } else if (t == "chinese") {
-        cJSON *text = cJSON_GetObjectItem(doc, "text");
-        if (text && cJSON_IsString(text))
-            ESP_LOGI(TAG, "chinese: %s", text->valuestring);
-    } else if (t == "mic_test") {
-        cJSON *dur = cJSON_GetObjectItem(doc, "duration");
-        int seconds = dur ? dur->valueint : 5;
+    } else if (type == "display") {
+        ESP_LOGI(TAG, "display: %s", get_json_str(msg, "text").c_str());
+    } else if (type == "chinese") {
+        ESP_LOGI(TAG, "chinese: %s", get_json_str(msg, "text").c_str());
+    } else if (type == "mic_test") {
+        int seconds = get_json_int(msg, "duration");
+        if (seconds <= 0) seconds = 5;
         mic.start();
         _micTestEnd = (esp_timer_get_time() / 1000) + (seconds * 1000);
         _state = STATE_MIC_TEST;
         ESP_LOGI(TAG, "MIC test %ds", seconds);
     }
-
-    cJSON_Delete(doc);
 }
 
 void onWiFiConnected() {
