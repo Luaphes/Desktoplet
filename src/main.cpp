@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string>
-#include <ArduinoJson.h>
+#include <cstdlib>
+#include <cJSON.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
@@ -29,30 +30,39 @@ static unsigned long _micTestEnd = 0;
 static int16_t _micBuf[128];
 
 static void handleWSMessage(const std::string &msg) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, msg);
-    if (err) return;
+    cJSON *doc = cJSON_Parse(msg.c_str());
+    if (!doc) return;
 
-    const char *type = doc["type"];
+    cJSON *type = cJSON_GetObjectItem(doc, "type");
+    if (!type || !cJSON_IsString(type)) { cJSON_Delete(doc); return; }
 
-    if (strcmp(type, "ota") == 0) {
-        const char *url = doc["url"];
-        if (url && strlen(url) > 0) {
+    std::string t = type->valuestring;
+
+    if (t == "ota") {
+        cJSON *url = cJSON_GetObjectItem(doc, "url");
+        if (url && cJSON_IsString(url)) {
             _state = STATE_OTA;
-            ESP_LOGI(TAG, "OTA from: %s", url);
-            otaManager.startOTA(url);
+            ESP_LOGI(TAG, "OTA from: %s", url->valuestring);
+            otaManager.startOTA(url->valuestring);
         }
-    } else if (strcmp(type, "display") == 0) {
-        ESP_LOGI(TAG, "display: %s", doc["text"].as<const char *>());
-    } else if (strcmp(type, "chinese") == 0) {
-        ESP_LOGI(TAG, "chinese: %s", doc["text"].as<const char *>());
-    } else if (strcmp(type, "mic_test") == 0) {
-        int seconds = doc["duration"] | 5;
+    } else if (t == "display") {
+        cJSON *text = cJSON_GetObjectItem(doc, "text");
+        if (text && cJSON_IsString(text))
+            ESP_LOGI(TAG, "display: %s", text->valuestring);
+    } else if (t == "chinese") {
+        cJSON *text = cJSON_GetObjectItem(doc, "text");
+        if (text && cJSON_IsString(text))
+            ESP_LOGI(TAG, "chinese: %s", text->valuestring);
+    } else if (t == "mic_test") {
+        cJSON *dur = cJSON_GetObjectItem(doc, "duration");
+        int seconds = dur ? dur->valueint : 5;
         mic.start();
         _micTestEnd = (esp_timer_get_time() / 1000) + (seconds * 1000);
         _state = STATE_MIC_TEST;
         ESP_LOGI(TAG, "MIC test %ds", seconds);
     }
+
+    cJSON_Delete(doc);
 }
 
 void onWiFiConnected() {
