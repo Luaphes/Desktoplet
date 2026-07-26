@@ -1,18 +1,23 @@
 #ifndef WEBSOCKET_H
 #define WEBSOCKET_H
 
-#include <Arduino.h>
-#include <ArduinoJson.h>
+#include <string>
+#include <functional>
 
 class WSClient {
 public:
-    void init(const String &host, int port);
+    void init(const std::string &host, uint16_t port);
     void loop();
+    void send(const std::string &msg);
     bool isConnected();
-    void send(const String &data);
-    void sendJson(JsonDocument &doc);
-    void onMessage(std::function<void(const String &)> callback);
-    void disconnect();
+    void onMessage(std::function<void(const std::string &)> cb);
+private:
+    void *_handle = nullptr;
+    std::function<void(const std::string &)> _onMsg;
+    std::string _host;
+    uint16_t _port = 8765;
+public:
+    bool _connected = false;
 };
 
 extern WSClient wsClient;

@@ -1,7 +1,7 @@
 #ifndef HERMES_LOGO_H
 #define HERMES_LOGO_H
 
-#include <Arduino.h>
+#include <stdint.h>
 
 // Hermes Agent logo, 64x64, XBM format (LSB-first)
 // Source: selfh.st/icons (CC BY 4.0)

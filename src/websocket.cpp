@@ -1,73 +1,80 @@
 #include "websocket.h"
-#include "pins.h"
-#include <WebSocketsClient.h>
+#include <esp_log.h>
+#include <esp_websocket_client.h>
+#include <cstring>
 
-static WebSocketsClient ws;
-static std::function<void(const String &)> _callback = nullptr;
-static String _host = "";
-static int _port = WS_PORT;
-static bool _connected = false;
+static const char *TAG = "WS";
 
-void WSClient::init(const String &host, int port) {
+WSClient wsClient;
+
+static void ws_event_handler(void *handler_args, esp_event_base_t base,
+                             int32_t event_id, void *event_data) {
+    auto *client = (esp_websocket_client_handle_t)handler_args;
+
+    switch (event_id) {
+    case WEBSOCKET_EVENT_CONNECTED:
+        ESP_LOGI(TAG, "WebSocket connected");
+        wsClient._connected = true;
+        break;
+    case WEBSOCKET_EVENT_DISCONNECTED:
+        ESP_LOGW(TAG, "WebSocket disconnected");
+        wsClient._connected = false;
+        break;
+    case WEBSOCKET_EVENT_DATA: {
+        auto *data = (esp_websocket_event_data_t *)event_data;
+        if (data->op_code == 1 && data->data_len > 0) {
+            std::string msg((char *)data->data_ptr, data->data_len);
+            ESP_LOGI(TAG, "RX: %s", msg.c_str());
+            if (wsClient._onMsg) {
+                wsClient._onMsg(msg);
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void WSClient::init(const std::string &host, uint16_t port) {
     _host = host;
     _port = port;
-    ws.begin(_host.c_str(), _port, "/");
-    ws.onEvent([](WStype_t type, uint8_t *payload, size_t len) {
-        switch (type) {
-            case WStype_DISCONNECTED:
-                _connected = false;
-                break;
-            case WStype_CONNECTED:
-                _connected = true;
-                break;
-            case WStype_TEXT: {
-                if (_callback && payload) {
-                    String msg = String((char *)payload);
-                    _callback(msg);
-                }
-                break;
-            }
-            default:
-                break;
-        }
-    });
-    ws.setReconnectInterval(WS_RECONNECT_SEC * 1000);
+
+    esp_websocket_client_config_t cfg = {};
+    cfg.host = _host.c_str();
+    cfg.port = _port;
+    cfg.path = "/";
+    cfg.keep_alive_enable = true;
+    cfg.keep_alive_idle_ms = 5000;
+    cfg.keep_alive_interval_ms = 3000;
+    cfg.network_timeout_ms = 10000;
+
+    _handle = esp_websocket_client_init(&cfg);
+    if (!_handle) {
+        ESP_LOGE(TAG, "Failed to init WebSocket");
+        return;
+    }
+
+    esp_websocket_register_events(
+        (esp_websocket_client_handle_t)_handle,
+        WEBSOCKET_EVENT_ANY, ws_event_handler, _handle);
+
+    esp_websocket_client_start((esp_websocket_client_handle_t)_handle);
 }
 
 void WSClient::loop() {
-    ws.loop();
-    // 每隔10秒检查连接状态，防止静默断开
-    static unsigned long lastPing = 0;
-    if (_connected && millis() - lastPing > 30000) {
-        lastPing = millis();
-        ws.sendTXT("{\"type\":\"ping\"}");
-    }
+    // Reconnection is handled automatically by esp_websocket_client
 }
 
-bool WSClient::isConnected() {
-    return _connected;
+void WSClient::send(const std::string &msg) {
+    if (!_handle || !_connected) return;
+    esp_websocket_client_send_text(
+        (esp_websocket_client_handle_t)_handle,
+        msg.c_str(), msg.length(), pdMS_TO_TICKS(1000));
 }
 
-void WSClient::send(const String &data) {
-    if (_connected) {
-        String payload = data;
-        ws.sendTXT(payload);
-    }
-}
+bool WSClient::isConnected() { return _connected; }
 
-void WSClient::sendJson(JsonDocument &doc) {
-    String buf;
-    serializeJson(doc, buf);
-    send(buf);
+void WSClient::onMessage(std::function<void(const std::string &)> cb) {
+    _onMsg = cb;
 }
-
-void WSClient::onMessage(std::function<void(const String &)> callback) {
-    _callback = callback;
-}
-
-void WSClient::disconnect() {
-    ws.disconnect();
-    _connected = false;
-}
-
-WSClient wsClient;
