@@ -1,271 +1,126 @@
-#include <Arduino.h>
+#include <stdio.h>
+#include <string>
+#include <cJSON.h>
+#include <esp_log.h>
+#include <nvs_flash.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include "pins.h"
-#include "wifi_manager.h"
-#include "websocket.h"
-#include "oled_display.h"
+#include "version.h"
 #include "button.h"
 #include "mic_i2s.h"
 #include "ota.h"
+#include "wifi_manager.h"
+#include "websocket.h"
 
-// 当前系统状态
-enum SystemState {
+static const char *TAG = "Main";
+
+enum State {
     STATE_BOOT,
+    STATE_CONFIG,
     STATE_CONNECTING,
-    STATE_CONFIG_PORTAL,
     STATE_RUNNING,
-    STATE_OTA
+    STATE_MIC_TEST,
+    STATE_OTA,
 };
-
-static SystemState state = STATE_BOOT;
-static unsigned long lastWiFiCheck = 0;
-static unsigned long _connectStart = 0;
-static bool otaInProgress = false;
-// 麦克风测试状态
+static State _state = STATE_BOOT;
 static unsigned long _micTestEnd = 0;
-static int16_t _micBuf[128]; // 16kHz 采样缓冲
+static int16_t _micBuf[128];
 
-// ---------- 处理收到的 WebSocket 消息 ----------
-void handleWSMessage(const String &msg) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, msg);
-    if (err) return;
+static void handleWSMessage(const std::string &msg) {
+    cJSON *doc = cJSON_Parse(msg.c_str());
+    if (!doc) return;
 
-    String type = doc["type"] | "";
+    cJSON *type = cJSON_GetObjectItem(doc, "type");
+    if (!type || !cJSON_IsString(type)) { cJSON_Delete(doc); return; }
 
-    // OTA 消息
-    if (type == "ota") {
-        String url = doc["url"] | "";
-        if (url.length() > 0) {
-            state = STATE_OTA;
-            display.showStatus("OTA...", "");
-            otaManager.startOTA(url);
+    std::string t = type->valuestring;
+
+    if (t == "ota") {
+        cJSON *url = cJSON_GetObjectItem(doc, "url");
+        if (url && cJSON_IsString(url)) {
+            _state = STATE_OTA;
+            ESP_LOGI(TAG, "OTA from: %s", url->valuestring);
+            otaManager.startOTA(url->valuestring);
         }
-        return;
-    }
-
-    // 显示消息
-    if (type == "display") {
-        String text = doc["text"] | "";
-        if (text.length() > 0) {
-            display.showCentered(text, 20, 1);
-        }
-        return;
-    }
-
-    // 状态消息
-    if (type == "status") {
-        String line1 = doc["line1"] | "";
-        String line2 = doc["line2"] | "";
-        display.showStatus(line1, line2);
-        return;
-    }
-
-    // 双行居中消息
-    if (type == "status_center") {
-        String line1 = doc["line1"] | "";
-        String line2 = doc["line2"] | "";
-        display.showCentered(line1, 20, 1);
-        display.showCentered(line2, 40, 1);
-        return;
-    }
-
-    // 清屏
-    if (type == "clear") {
-        display.clear();
-        return;
-    }
-
-    // 中文显示
-    if (type == "chinese") {
-        String text = doc["text"] | "";
-        if (text.length() > 0) {
-            int x = doc["x"] | -1;
-            int y = doc["y"] | 20;
-            if (x >= 0)
-                display.showChinese(text, x, y);
-            else
-                display.chineseCentered(text, y);
-        }
-        return;
-    }
-
-    // 点阵图
-    if (type == "bitmap") {
-        int x = doc["x"] | 0;
-        int y = doc["y"] | 0;
-        int w = doc["w"] | 0;
-        int h = doc["h"] | 0;
-        JsonArray arr = doc["data"].as<JsonArray>();
-        if (w > 0 && h > 0 && arr.size() > 0) {
-            uint8_t *buf = new uint8_t[arr.size()];
-            for (size_t i = 0; i < arr.size(); i++) {
-                buf[i] = arr[i].as<uint8_t>();
-            }
-            display.drawBitmap(x, y, w, h, buf);
-            delete[] buf;
-        }
-        return;
-    }
-
-    // 多行排版
-    if (type == "multi") {
-        JsonArray lines = doc["lines"].as<JsonArray>();
-        if (lines.size() > 0) {
-            OLEDDisplay::Line lineBuf[8];
-            uint8_t count = min((uint8_t)lines.size(), (uint8_t)8);
-            for (uint8_t i = 0; i < count; i++) {
-                JsonObject l = lines[i];
-                lineBuf[i].text = l["text"] | "";
-                String a = l["align"] | "c";
-                lineBuf[i].align = (a == "l") ? 0 : (a == "r") ? 2 : 1;
-                lineBuf[i].size = l["size"] | 1;
-            }
-            display.showMulti(lineBuf, count);
-        }
-        return;
-    }
-
-    // 麦克风测试
-    if (type == "mic_test") {
-        int duration = doc["duration"] | 5;
+    } else if (t == "display") {
+        ESP_LOGI(TAG, "display: %s", cJSON_GetObjectItem(doc,"text")->valuestring);
+    } else if (t == "chinese") {
+        ESP_LOGI(TAG, "chinese: %s", cJSON_GetObjectItem(doc,"text")->valuestring);
+    } else if (t == "mic_test") {
+        cJSON *dur = cJSON_GetObjectItem(doc, "duration");
+        int seconds = dur ? dur->valueint : 5;
         mic.start();
-        _micTestEnd = millis() + (duration * 1000UL);
-        display.chineseCentered("MIC 测试", 20);
-        display.chineseCentered("吹口气看看", 48);
-        return;
+        _micTestEnd = (esp_timer_get_time() / 1000) + (seconds * 1000);
+        _state = STATE_MIC_TEST;
+        ESP_LOGI(TAG, "MIC test %ds", seconds);
     }
+
+    cJSON_Delete(doc);
 }
 
-// ---------- setup ----------
-void setup() {
-    Serial.begin(115200);
-    delay(500);
+void onWiFiConnected() {
+    _state = STATE_RUNNING;
+    ESP_LOGI(TAG, "WiFi OK");
+    wsClient.init(wifiManager.getECSAddress(), wifiManager.getECSPort());
+    wsClient.onMessage(handleWSMessage);
+}
 
-    // OLED 初始化
-    if (!display.init()) {
-        // OLED 没连上，但系统继续跑（可以通过串口调试）
+extern "C" void app_main() {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
     }
 
-    // 开机动画
-    display.bootAnimation();
-
-    // 按键初始化
     button.init();
-
-    // 麦克风（v0.1 留空）
     mic.init();
-
-    // OTA 初始化
     otaManager.init();
-
-    // WiFi 初始化（读到 NVS 有密码就连，没有就进配网）
     wifiManager.init();
 
     if (wifiManager.needsConfig()) {
-        state = STATE_CONFIG_PORTAL;
-        display.showCentered("Config Mode", 20);
+        _state = STATE_CONFIG;
+        wifiManager.startConfigPortal();
     } else {
-        state = STATE_CONNECTING;
-        display.showStatus("Connecting...", "");
-        _connectStart = millis();
-    }
-}
-
-// ---------- loop ----------
-void loop() {
-    // 配网模式（阻塞在 wifi_manager.cpp 里）
-    if (state == STATE_CONFIG_PORTAL) {
-        // 正常情况下不会跑到这里，wifiManager.startConfigPortal() 是阻塞的
-        // 如果它返回了（超时），重启
-        delay(1000);
-        ESP.restart();
+        _state = STATE_CONNECTING;
+        ESP_LOGI(TAG, "Connecting...");
     }
 
-    // OTA 升级中
-    if (state == STATE_OTA) {
-        display.showStatus("OTA update...", "");
-        delay(500);
-        if (!otaManager.isUpdating()) {
-            state = STATE_RUNNING;
-        }
-        return;
-    }
-
-    // WiFi 状态检查（非阻塞）
-    if (state == STATE_CONNECTING || state == STATE_RUNNING) {
-        unsigned long now = millis();
-        if (now - lastWiFiCheck > 1000) {
-            lastWiFiCheck = now;
-
-            if (wifiManager.isConnected()) {
-                if (state == STATE_CONNECTING) {
-                    state = STATE_RUNNING;
-                    display.showStatus("WiFi OK", wifiManager.getLocalIP());
-                    // 初始化 WebSocket
-                    wsClient.init(wifiManager.getECSAddress(), wifiManager.getECSPort());
-                    wsClient.onMessage(handleWSMessage);
-                }
+    while (true) {
+        if (_state == STATE_MIC_TEST) {
+            unsigned long now = esp_timer_get_time() / 1000;
+            if (now >= _micTestEnd) {
+                _micTestEnd = 0;
+                _state = STATE_RUNNING;
+                ESP_LOGI(TAG, "MIC test done");
             } else {
-                if (state == STATE_RUNNING) {
-                    // 断线了
-                    state = STATE_CONNECTING;
-                    display.showStatus("WiFi lost", "Reconnecting...");
-                    _connectStart = now;
+                int n = mic.readData(_micBuf, 16);
+                if (n > 0) {
+                    int32_t sum = 0;
+                    for (int i = 0; i < n; i++) {
+                        int32_t v = _micBuf[i];
+                        if (v < 0) v = -v;
+                        sum += v;
+                    }
+                    int avg = sum / n;
+                    ESP_LOGI(TAG, "mic level: %d", avg);
                 }
             }
+            vTaskDelay(pdMS_TO_TICKS(30));
+            continue;
         }
 
-        // WiFi 重连超时（2 分钟不进配网 → 清 NVS 进配网）
-        if (state == STATE_CONNECTING && !wifiManager.isConnected()) {
-            if (now - _connectStart > 120000) {
-                wifiManager.clearAndRestart();
-            }
-        }
-    }
+        wsClient.loop();
 
-    // WebSocket loop
-    wsClient.loop();
-
-    // 按键检测
-    int btn = button.check();
-    if (btn == 1) {
-        // 短按 → 通知 ECS
-        if (wsClient.isConnected()) {
+        int btn = button.check();
+        if (btn == 1 && wsClient.isConnected()) {
             wsClient.send("{\"type\":\"btn_click\"}");
+        } else if (btn == 2) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            wifiManager.clearAndRestart();
         }
-    } else if (btn == 2) {
-        // 长按 5 秒 → 清 NVS 重配网
-        display.showCentered("Reset WiFi...", 20, 1);
-        delay(500);
-        wifiManager.clearAndRestart();
-    }
 
-    // ---------- 麦克风测试 ----------
-    if (_micTestEnd > 0) {
-        unsigned long now = millis();
-        if (now >= _micTestEnd) {
-            // 测试结束
-            _micTestEnd = 0;
-            display.chineseCentered("恢复连网...", 32);
-        } else {
-            int n = mic.readData(_micBuf, 4);
-            if (n > 0) {
-                // 计算平均振幅（简版，不用 sqrt）
-                int32_t sum = 0;
-                for (int i = 0; i < n; i++) {
-                    int32_t v = _micBuf[i];
-                    if (v < 0) v = -v;
-                    sum += v;
-                }
-                int avg = sum / n;
-                // 映射到 0-100 (INMP441 安静 ~50-200, 正常说话 ~2000-6000)
-                int level = constrain(map(avg, 0, 5000, 0, 100), 0, 100);
-                display.drawVolumeBar(level);
-            }
-        }
-        delay(30); // ~30fps OTA 时也够
-        return;    // 测试期间跳过其他循环
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-
-    delay(10);
 }
