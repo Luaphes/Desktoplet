@@ -9,7 +9,6 @@ WSClient wsClient;
 
 static void ws_event_handler(void *handler_args, esp_event_base_t base,
                              int32_t event_id, void *event_data) {
-    auto *client = (esp_websocket_client_handle_t)handler_args;
 
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
@@ -45,8 +44,8 @@ void WSClient::init(const std::string &host, uint16_t port) {
     cfg.port = _port;
     cfg.path = "/";
     cfg.keep_alive_enable = true;
-    cfg.keep_alive_idle_ms = 5000;
-    cfg.keep_alive_interval_ms = 3000;
+    cfg.keep_alive_idle = 5000;
+    cfg.keep_alive_interval = 3000;
     cfg.network_timeout_ms = 10000;
 
     _handle = esp_websocket_client_init(&cfg);

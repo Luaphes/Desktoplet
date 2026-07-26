@@ -7,7 +7,6 @@
 #include <esp_netif.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
-#include <dns_server.h>
 #include <lwip/sockets.h>
 
 static const char *TAG = "WiFi";
