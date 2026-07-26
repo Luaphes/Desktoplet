@@ -55,7 +55,7 @@ bool LWIP_WS::connect(const char *host, int port) {
 
     if (::connect(_sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         ESP_LOGE(TAG, "connect failed");
-        close(_sock); _sock = -1; return false;
+        ::close(_sock); _sock = -1; return false;
     }
 
     // WebSocket 握手
@@ -70,15 +70,15 @@ bool LWIP_WS::connect(const char *host, int port) {
         "Sec-WebSocket-Version: 13\r\n\r\n",
         host, port, key.c_str());
 
-    int n = send(_sock, req, strlen(req), 0);
+    int n = ::send(_sock, req, strlen(req), 0);
     if (n <= 0) { close(_sock); _sock = -1; return false; }
 
     // 读 101 响应
     char rsp[512];
-    n = recv(_sock, rsp, sizeof(rsp) - 1, 0);
+    n = ::recv(_sock, rsp, sizeof(rsp) - 1, 0);
     if (n <= 0 || !strstr(rsp, "101")) {
         ESP_LOGE(TAG, "handshake failed: %s", rsp);
-        close(_sock); _sock = -1; return false;
+        ::close(_sock); _sock = -1; return false;
     }
 
     _connected = true;
@@ -87,7 +87,7 @@ bool LWIP_WS::connect(const char *host, int port) {
 }
 
 void LWIP_WS::disconnect() {
-    if (_sock >= 0) { close(_sock); _sock = -1; }
+    if (_sock >= 0) { ::close(_sock); _sock = -1; }
     _connected = false;
 }
 
@@ -110,7 +110,7 @@ static void ws_recv_task(void *arg) {
     auto *self = (LWIP_WS*)arg;
     uint8_t buf[512];
     while (self->isConnected()) {
-        int n = recv(self->_sock, buf, sizeof(buf), 0);
+        int n = ::recv(self->_sock, buf, sizeof(buf), 0);
         if (n <= 0) {
             ESP_LOGW(TAG, "recv failed, disconnected");
             self->disconnect();
