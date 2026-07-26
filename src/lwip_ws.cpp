@@ -1,6 +1,5 @@
 /*
  * lwip_ws.cpp — 基于 LWIP socket 的 WebSocket 客户端
- * 不依赖 esp_websocket_client 组件，直接 TCP + WebSocket 握手
  */
 #include "lwip_ws.h"
 #include <lwip/sockets.h>
@@ -10,21 +9,30 @@
 #include <freertos/task.h>
 #include <cstring>
 #include <cstdlib>
-#include <mbedtls/sha1.h>
-#include <mbedtls/base64.h>
 
 static const char *TAG = "LWIP_WS";
 
 LWIP_WS ws;
 
-// 生成 WebSocket 握手用的 Sec-WebSocket-Key
+// 简单 base64 编码（只用于 16 字节 WebSocket key，输出固定 24 字节）
 static std::string ws_gen_key() {
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     uint8_t buf[16];
     for (int i = 0; i < 16; i++) buf[i] = rand() & 0xff;
-    size_t olen = 0;
-    unsigned char out[32];
-    mbedtls_base64_encode(out, sizeof(out), &olen, buf, 16);
-    return std::string((char*)out, olen);
+    unsigned char out[24];
+    int o = 0;
+    for (int i = 0; i < 15; i += 3) {
+        out[o++] = b64[buf[i] >> 2];
+        out[o++] = b64[((buf[i] & 0x03) << 4) | (buf[i+1] >> 4)];
+        out[o++] = b64[((buf[i+1] & 0x0f) << 2) | (buf[i+2] >> 6)];
+        out[o++] = b64[buf[i+2] & 0x3f];
+    }
+    // last byte: pad
+    out[o++] = b64[buf[15] >> 2];
+    out[o++] = b64[(buf[15] & 0x03) << 4];
+    out[o++] = '=';
+    out[o++] = '=';
+    return std::string((char*)out, o);
 }
 
 bool LWIP_WS::connect(const char *host, int port) {

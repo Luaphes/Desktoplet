@@ -135,11 +135,11 @@ extern "C" void app_main() {
             continue;
         }
 
-        wsClient.loop();
+        ws.loop();
 
         int btn = button.check();
-        if (btn == 1 && wsClient.isConnected()) {
-            wsClient.send("{\"type\":\"btn_click\"}");
+        if (btn == 1 && ws.isConnected()) {
+            ws.send("{\"type\":\"btn_click\"}");
         } else if (btn == 2) {
             vTaskDelay(pdMS_TO_TICKS(500));
             wifiManager.clearAndRestart();
