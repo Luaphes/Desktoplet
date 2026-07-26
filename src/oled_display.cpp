@@ -157,12 +157,6 @@ static void fill_rect(int x, int y, int w, int h) {
     }
 }
 
-static void draw_rect(int x, int y, int w, int h) {
-    for (int i = 0; i < w; i++) { draw_char(x + i, y, ' ', false); } // top
-    for (int i = 0; i < w; i++) { draw_char(x + i, y + h - 1, ' ', false); } // bottom
-    // Proper rect drawing via fill_rect
-}
-
 // ---- Public API ----
 
 bool OLEDDisplay::init() {

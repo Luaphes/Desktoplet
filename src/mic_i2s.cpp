@@ -3,6 +3,7 @@
 #include <driver/i2s_std.h>
 #include <freertos/FreeRTOS.h>
 #include <esp_log.h>
+#include <cstring>
 
 static i2s_chan_handle_t rx_chan = NULL;
 static const char *TAG = "I2S";
@@ -14,13 +15,13 @@ void MicI2S::init() {}
 void MicI2S::start() {
     if (rx_chan) return;
 
-    // 1. 通道配置 — 零初始化（ESP-IDF 6.x 要显式清避免 missing-field-initializers）
-    i2s_chan_config_t chan_cfg = {
-        .id = I2S_NUM_0,
-        .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 2,
-        .dma_frame_num = 8,
-    };
+    // 1. 通道配置 — memset 清零然后逐字段赋值（避免缺失字段警告）
+    i2s_chan_config_t chan_cfg;
+    memset(&chan_cfg, 0, sizeof(chan_cfg));
+    chan_cfg.id = I2S_NUM_0;
+    chan_cfg.role = I2S_ROLE_MASTER;
+    chan_cfg.dma_desc_num = 2;
+    chan_cfg.dma_frame_num = 8;
     esp_err_t err = i2s_new_channel(&chan_cfg, NULL, &rx_chan);
     if (err != ESP_OK || rx_chan == NULL) return;
 
