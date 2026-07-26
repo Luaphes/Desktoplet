@@ -82,7 +82,7 @@ void WiFiManager::startConfigPortal() {
     http_cfg.server_port = 80;
     httpd_start(&server, &http_cfg);
 
-    httpd_register_uri_handler(server, &(httpd_uri_t){
+    httpd_uri_t uri_root = {
         .uri = "/", .method = HTTP_GET,
         .handler = [](httpd_req_t *r) -> esp_err_t {
             const char *html = R"HTML(
@@ -100,16 +100,17 @@ button{width:100%;padding:10px;background:#07c;color:#fff;border:none;font-size:
 </form></body></html>)HTML";
             httpd_resp_send(r, html, strlen(html));
             return ESP_OK;
-        }
-    });
+        },
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &uri_root);
 
-    httpd_register_uri_handler(server, &(httpd_uri_t){
+    httpd_uri_t uri_save = {
         .uri = "/save", .method = HTTP_POST,
         .handler = [](httpd_req_t *r) -> esp_err_t {
             char buf[512] = {};
             httpd_req_recv(r, buf, sizeof(buf) - 1);
             char ssid[64] = {}, pass[128] = {};
-            char *p = buf;
             // Parse: ssid=xxx&pass=yyy
             if (sscanf(buf, "ssid=%63[^&]&pass=%127s", ssid, pass) >= 1) {
                 // URL decode in-place
@@ -142,8 +143,10 @@ button{width:100%;padding:10px;background:#07c;color:#fff;border:none;font-size:
             }
             httpd_resp_sendstr(r, "Invalid input");
             return ESP_OK;
-        }
-    });
+        },
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &uri_save);
 }
 
 bool WiFiManager::isConnected() {
