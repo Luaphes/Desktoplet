@@ -50,9 +50,6 @@ bool LWIP_WS::connect(const char *host, int port) {
     addr.sin_port = htons(port);
     memcpy(&addr.sin_addr, he->h_addr, he->h_length);
 
-    struct timeval tv = {10, 0};
-    setsockopt(_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
     if (::connect(_sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         ESP_LOGE(TAG, "connect failed");
         ::close(_sock); _sock = -1; return false;
