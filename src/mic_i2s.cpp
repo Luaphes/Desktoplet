@@ -1,6 +1,7 @@
 #include "mic_i2s.h"
 #include "pins.h"
 #include <driver/i2s_std.h>
+#include <freertos/FreeRTOS.h>  // for pdMS_TO_TICKS
 
 static i2s_chan_handle_t rx_chan = NULL;
 
@@ -11,17 +12,24 @@ void MicI2S::init() {}
 void MicI2S::start() {
     if (rx_chan) return;
 
-    // ESP-IDF 5.x I2S STD API — C3 GDMA 兼容
+    // 1. 通道配置
+    i2s_chan_config_t chan_cfg = {
+        .id = I2S_NUM_0,
+        .role = I2S_ROLE_MASTER,
+        .comm = I2S_COMM_MODE_STD,
+        .dir = I2S_DIR_RX,
+    };
+    esp_err_t err = i2s_new_channel(&chan_cfg, NULL, &rx_chan);
+    if (err != ESP_OK || rx_chan == NULL) return;
+
+    // 2. STD 模式配置
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
             .sample_rate_hz = 16000,
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
         },
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT(
-            I2S_DATA_BIT_WIDTH_16BIT,
-            I2S_SLOT_MODE_MONO
-        ),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = MIC_SCK,
@@ -35,10 +43,14 @@ void MicI2S::start() {
             },
         },
     };
+    err = i2s_channel_init_std_mode(rx_chan, &std_cfg);
+    if (err != ESP_OK) {
+        i2s_del_channel(rx_chan);
+        rx_chan = NULL;
+        return;
+    }
 
-    esp_err_t err = i2s_new_channel(&std_cfg, NULL, &rx_chan);
-    if (err != ESP_OK || rx_chan == NULL) return;
-
+    // 3. 启用
     err = i2s_channel_enable(rx_chan);
     if (err != ESP_OK) {
         i2s_del_channel(rx_chan);
