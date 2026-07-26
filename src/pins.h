@@ -15,6 +15,7 @@
 // 按键时长定义
 #define LONG_PRESS_MS    5000
 #define SHORT_PRESS_MAX  1200
+#define SHORT_PRESS_MIN  50
 #define DEBOUNCE_MS      50
 
 // WebSocket
