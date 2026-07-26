@@ -50,6 +50,7 @@ void WSClient::init(const std::string &host, uint16_t port) {
     cfg.buffer_size = 2048;
     cfg.task_stack = 4096;
     cfg.disable_pingpong_discon = true;
+    cfg.transport = WEBSOCKET_TRANSPORT_OVER_TCP;
 
     _handle = esp_websocket_client_init(&cfg);
     if (!_handle) {
