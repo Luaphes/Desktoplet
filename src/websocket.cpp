@@ -47,6 +47,9 @@ void WSClient::init(const std::string &host, uint16_t port) {
     cfg.keep_alive_idle = 5000;
     cfg.keep_alive_interval = 3000;
     cfg.network_timeout_ms = 10000;
+    cfg.buffer_size = 2048;
+    cfg.task_stack = 4096;
+    cfg.disable_pingpong_discon = true;
 
     _handle = esp_websocket_client_init(&cfg);
     if (!_handle) {

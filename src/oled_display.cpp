@@ -75,8 +75,8 @@ static void oled_init_seq() {
     oled_write_cmd(0xA8); oled_write_cmd(0x3F); // mux ratio
     oled_write_cmd(0xD3); oled_write_cmd(0x00); // display offset
     oled_write_cmd(0x40); // start line
-    oled_write_cmd(0xA0); // segment remap off (column 0=SEG0)
-    oled_write_cmd(0xC0); // COM scan normal (COM0→COM63)
+    oled_write_cmd(0xA1); // segment remap (column 127=SEG0)
+    oled_write_cmd(0xC8); // COM scan (COM63→COM0)
     oled_write_cmd(0xDA); oled_write_cmd(0x12); // COM pins
     oled_write_cmd(0x81); oled_write_cmd(0x7F); // contrast
     oled_write_cmd(0xA4); // display on resume
@@ -90,7 +90,7 @@ static void oled_init_seq() {
 static void oled_flush() {
     for (int page = 0; page < PAGES; page++) {
         oled_write_cmd(0xB0 + page); // set page
-        oled_write_cmd(0x02); // lower column start (SH1106 offset)
+        oled_write_cmd(0x00); // lower column start (SSD1315: col 0)
         oled_write_cmd(0x10); // upper column start
         oled_write_data(_fb + page * WIDTH, WIDTH);
     }
