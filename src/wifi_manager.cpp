@@ -71,10 +71,79 @@ void WiFiManager::startConfigPortal() {
     esp_wifi_start();
 
     ESP_LOGI(TAG, "Config Mode - ESP32-Config");
+    ESP_LOGI(TAG, "Connect to WiFi 'ESP32-Config', open http://192.168.4.1");
 
-    // Simple config form via raw TCP (no HTTP server needed for minimal portal)
-    // For brevity: creates a TCP server on port 80
-    // User browses to 192.168.4.1, sees form, submits SSID/password
+    // Minimal HTTP server for config form
+    static httpd_handle_t server = NULL;
+    if (server) return;
+
+    httpd_config_t http_cfg = HTTPD_DEFAULT_CONFIG();
+    http_cfg.max_uri_handlers = 3;
+    http_cfg.server_port = 80;
+    httpd_start(&server, &http_cfg);
+
+    httpd_register_uri_handler(server, &(httpd_uri_t){
+        .uri = "/", .method = HTTP_GET,
+        .handler = [](httpd_req_t *r) -> esp_err_t {
+            const char *html = R"HTML(
+<!DOCTYPE html><html><head><meta charset='utf-8'><title>ESP32 Config</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>body{font-family:sans-serif;padding:20px;max-width:400px;margin:auto}
+input{width:100%;padding:8px;margin:8px 0}
+button{width:100%;padding:10px;background:#07c;color:#fff;border:none;font-size:16px}
+</style></head><body>
+<h2>ESP32 WiFi Config</h2>
+<form action='/save' method='post'>
+<label>WiFi SSID</label><input name='ssid' required><br>
+<label>Password</label><input name='pass' type='password'><br>
+<button type='submit'>Save & Restart</button>
+</form></body></html>)HTML";
+            httpd_resp_send(r, html, strlen(html));
+            return ESP_OK;
+        }
+    });
+
+    httpd_register_uri_handler(server, &(httpd_uri_t){
+        .uri = "/save", .method = HTTP_POST,
+        .handler = [](httpd_req_t *r) -> esp_err_t {
+            char buf[512] = {};
+            httpd_req_recv(r, buf, sizeof(buf) - 1);
+            char ssid[64] = {}, pass[128] = {};
+            char *p = buf;
+            // Parse: ssid=xxx&pass=yyy
+            if (sscanf(buf, "ssid=%63[^&]&pass=%127s", ssid, pass) >= 1) {
+                // URL decode in-place
+                auto url_decode = [](char *s) {
+                    char *d = s;
+                    while (*s) {
+                        if (*s == '+') { *d++ = ' '; s++; }
+                        else if (*s == '%' && *(s+1) && *(s+2)) {
+                            char h[3] = {s[1], s[2], 0};
+                            *d++ = strtol(h, NULL, 16);
+                            s += 3;
+                        } else { *d++ = *s++; }
+                    }
+                    *d = 0;
+                };
+                url_decode(ssid);
+                url_decode(pass);
+                nvs_handle_t nvs;
+                if (nvs_open(NVS_NS, NVS_READWRITE, &nvs) == ESP_OK) {
+                    nvs_set_str(nvs, "ssid", ssid);
+                    nvs_set_str(nvs, "pass", pass);
+                    nvs_set_str(nvs, "ecs_addr", "118.31.46.156");
+                    nvs_set_u16(nvs, "ecs_port", 8765);
+                    nvs_commit(nvs);
+                    nvs_close(nvs);
+                }
+                httpd_resp_sendstr(r, "OK, restarting...");
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                esp_restart();
+            }
+            httpd_resp_sendstr(r, "Invalid input");
+            return ESP_OK;
+        }
+    });
 }
 
 bool WiFiManager::isConnected() {
