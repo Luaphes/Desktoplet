@@ -71,18 +71,19 @@ static void oled_write_data(const uint8_t *data, int len) {
 static void oled_init_seq() {
     esp_rom_delay_us(100000); // power-up delay
     oled_write_cmd(0xAE); // display off
-    oled_write_cmd(0xD5); oled_write_cmd(0x80); // clock div
+    oled_write_cmd(0xD5); oled_write_cmd(0x90); // clock divide
     oled_write_cmd(0xA8); oled_write_cmd(0x3F); // mux ratio
     oled_write_cmd(0xD3); oled_write_cmd(0x00); // display offset
     oled_write_cmd(0x40); // start line
-    oled_write_cmd(0xA0); // segment: col0=SEG0 (正常)
-    oled_write_cmd(0xC0); // COM scan COM0→COM63 (正常)
+    oled_write_cmd(0xA1); // segment remap
+    oled_write_cmd(0xC8); // COM scan reverse
     oled_write_cmd(0xDA); oled_write_cmd(0x12); // COM pins
     oled_write_cmd(0x81); oled_write_cmd(0x7F); // contrast
-    oled_write_cmd(0xA4); // display on resume
-    oled_write_cmd(0xA6); // normal display
     oled_write_cmd(0xD9); oled_write_cmd(0x22); // pre-charge
-    oled_write_cmd(0xDB); oled_write_cmd(0x20); // VCOM detect
+    oled_write_cmd(0xDB); oled_write_cmd(0x30); // VCOM deselect
+    oled_write_cmd(0xA4); // output RAM to display
+    oled_write_cmd(0xA6); // normal (non-inverted)
+    oled_write_cmd(0xAD); oled_write_cmd(0x10); // internal Iref
     oled_write_cmd(0x8D); oled_write_cmd(0x14); // charge pump
     oled_write_cmd(0xAF); // display on
 }
