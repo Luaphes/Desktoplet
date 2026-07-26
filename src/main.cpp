@@ -1,150 +1,160 @@
-#include <stdio.h>
-#include <string>
-#include <cstring>
-#include <esp_timer.h>
-#include <esp_log.h>
-#include <nvs_flash.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include <HTTPUpdate.h>
+#include <U8g2lib.h>
+#include <driver/i2s.h>
+#include <Preferences.h>
 
-#include "pins.h"
-#include "version.h"
-#include "oled_display.h"
-#include "button.h"
-#include "mic_i2s.h"
-#include "ota.h"
-#include "wifi_manager.h"
-#include "lwip_ws.h"
+// ---- OLED (SSD1315 via U8g2 HW I2C) ----
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
-static const char *TAG = "Main";
+// ---- WebSocket ----
+WebSocketsClient ws;
+Preferences prefs;
 
-enum State {
-    STATE_BOOT,
-    STATE_CONFIG,
-    STATE_CONNECTING,
-    STATE_RUNNING,
-    STATE_MIC_TEST,
-    STATE_OTA,
-};
-static State _state = STATE_BOOT;
-static unsigned long _micTestEnd = 0;
-static int16_t _micBuf[128];
+const char *ECS_HOST = "118.31.46.156";
+const uint16_t ECS_PORT = 8765;
+const char *OTA_PATH = "/firmware.bin";
 
-// 手写 JSON 字段提取，不依赖任何 JSON 库
-static std::string get_json_str(const std::string &json, const std::string &key) {
-    std::string search = "\"" + key + "\":\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return "";
-    pos += search.length();
-    size_t end = json.find("\"", pos);
-    if (end == std::string::npos) return "";
-    return json.substr(pos, end - pos);
+// ---- I2S (INMP441, old API) ----
+#define I2S_WS   2
+#define I2S_SCK  3
+#define I2S_SD   4
+
+void initI2S() {
+    i2s_config_t cfg = {
+        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+        .sample_rate = 16000,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_I2S,
+        .intr_alloc_flags = 0,
+        .dma_buf_count = 4,
+        .dma_buf_len = 64,
+        .use_apll = false,
+    };
+    i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+    i2s_pin_config_t pin = {
+        .bck_io_num = I2S_SCK,
+        .ws_io_num = I2S_WS,
+        .data_out_num = I2S_PIN_NO_CHANGE,
+        .data_in_num = I2S_SD,
+    };
+    i2s_set_pin(I2S_NUM_0, &pin);
+    i2s_start(I2S_NUM_0);
 }
 
-static int get_json_int(const std::string &json, const std::string &key) {
-    std::string search = "\"" + key + "\":";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return 0;
-    pos += search.length();
-    char *end;
-    return strtol(json.c_str() + pos, &end, 10);
-}
-
-static void handleWSMessage(const std::string &msg) {
-    // 回显确认收到消息
-    ws.send("{\"type\":\"ack\"}");
-    
-    std::string type = get_json_str(msg, "type");
-    if (type.empty()) return;
-
-    if (type == "ota") {
-        std::string url = get_json_str(msg, "url");
-        if (!url.empty()) {
-            _state = STATE_OTA;
-            ESP_LOGI(TAG, "OTA from: %s", url.c_str());
-            otaManager.startOTA(url);
-        }
-    } else if (type == "display") {
-        ESP_LOGI(TAG, "display: %s", get_json_str(msg, "text").c_str());
-    } else if (type == "chinese") {
-        ESP_LOGI(TAG, "chinese: %s", get_json_str(msg, "text").c_str());
-    } else if (type == "mic_test") {
-        int seconds = get_json_int(msg, "duration");
-        if (seconds <= 0) seconds = 5;
-        mic.start();
-        _micTestEnd = (esp_timer_get_time() / 1000) + (seconds * 1000);
-        _state = STATE_MIC_TEST;
-        display.showCentered("MIC Test", 20);
-        ESP_LOGI(TAG, "MIC test %ds", seconds);
+// ---- WiFi ----
+bool connectWiFi() {
+    String ssid = prefs.getString("ssid", "");
+    String pass = prefs.getString("pass", "");
+    if (ssid.isEmpty()) return false;
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 30) {
+        delay(1000); tries++;
     }
+    return WiFi.status() == WL_CONNECTED;
 }
 
-void onWiFiConnected() {
-    _state = STATE_RUNNING;
-    ESP_LOGI(TAG, "WiFi OK");
-    display.showStatus("WiFi OK", wifiManager.getLocalIP().c_str());
-    ws.connect(wifiManager.getECSAddress().c_str(), wifiManager.getECSPort());
-    ws.onMessage(handleWSMessage);
-}
-
-extern "C" void app_main() {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        nvs_flash_erase();
-        nvs_flash_init();
-    }
-
-    button.init();
-    display.init();
-    display.bootAnimation();
-    mic.init();
-    otaManager.init();
-    wifiManager.init();
-
-    if (wifiManager.needsConfig()) {
-        _state = STATE_CONFIG;
-        display.showCentered("Config Mode", 20);
-        wifiManager.startConfigPortal();
-    } else {
-        _state = STATE_CONNECTING;
-        display.showCentered("Connecting...", 20);
-        ESP_LOGI(TAG, "Connecting...");
-    }
-
-    while (true) {
-        if (_state == STATE_MIC_TEST) {
-            unsigned long now = esp_timer_get_time() / 1000;
-            if (now >= _micTestEnd) {
-                _micTestEnd = 0;
-                _state = STATE_RUNNING;
-                ESP_LOGI(TAG, "MIC test done");
-            } else {
-                int n = mic.readData(_micBuf, 16);
-                if (n > 0) {
-                    int32_t sum = 0;
-                    for (int i = 0; i < n; i++) {
-                        int32_t v = _micBuf[i];
-                        if (v < 0) v = -v;
-                        sum += v;
-                    }
-                    int avg = sum / n;
-                    ESP_LOGI(TAG, "mic level: %d", avg);
+// ---- WS Event ----
+void wsEvent(WStype_t type, uint8_t *data, size_t len) {
+    if (type == WStype_TEXT) {
+        String msg((char*)data, len);
+        if (msg.indexOf("\"ota\"") >= 0) {
+            // Parse URL and OTA
+            int u = msg.indexOf("\"url\":\"");
+            if (u >= 0) {
+                u += 7;
+                int e = msg.indexOf("\"", u);
+                String url = msg.substring(u, e);
+                u8g2.clearBuffer();
+                u8g2.setFont(u8g2_font_ncenB08_tr);
+                u8g2.drawStr(0, 30, "OTA Update...");
+                u8g2.sendBuffer();
+                t_httpUpdate_return ret = httpUpdate.update(ws, url);
+                if (ret == HTTP_UPDATE_OK) {
+                    ESP.restart();
                 }
             }
-            vTaskDelay(pdMS_TO_TICKS(30));
-            continue;
+        } else if (msg.indexOf("\"display\"") >= 0) {
+            int t = msg.indexOf("\"text\":\"");
+            String text = "";
+            if (t >= 0) {
+                t += 8;
+                int e = msg.indexOf("\"", t);
+                text = msg.substring(t, e);
+            }
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            int tw = u8g2.getStrWidth(text.c_str());
+            u8g2.drawStr((128 - tw) / 2, 32, text.c_str());
+            u8g2.sendBuffer();
         }
-
-        ws.loop();
-
-        int btn = button.check();
-        if (btn == 1 && ws.isConnected()) {
-            ws.send("{\"type\":\"btn_click\"}");
-        } else if (btn == 2) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            wifiManager.clearAndRestart();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(10));
+        ws.sendTXT("{\"type\":\"ack\"}");
     }
+}
+
+void setup() {
+    Serial.begin(115200);
+    prefs.begin("desktoppy", false);
+
+    // OLED
+    u8g2.begin();
+    u8g2.setFlipMode(0);
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB14_tr);
+    u8g2.drawStr(8, 36, "Link Start!");
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.drawStr(104, 60, FIRMWARE_VERSION);
+    u8g2.sendBuffer();
+    delay(1500);
+
+    // WiFi
+    if (!connectWiFi()) {
+        // Config mode via serial
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.drawStr(0, 12, "No WiFi saved");
+        u8g2.drawStr(0, 28, "Use Serial:");
+        u8g2.drawStr(0, 44, "ssid:xxx pass:yyy");
+        u8g2.sendBuffer();
+        while (!WiFi.isConnected()) {
+            if (Serial.available()) {
+                String cmd = Serial.readStringUntil('\n');
+                if (cmd.startsWith("ssid:")) {
+                    cmd.remove(0, 5);
+                    int sp = cmd.indexOf(" pass:");
+                    String s = cmd.substring(0, sp);
+                    String p = cmd.substring(sp + 6);
+                    prefs.putString("ssid", s);
+                    prefs.putString("pass", p);
+                    WiFi.begin(s.c_str(), p.c_str());
+                }
+            }
+            delay(100);
+        }
+        ESP.restart();
+    }
+
+    // Display status
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.drawStr(0, 12, "WiFi OK");
+    String ip = WiFi.localIP().toString();
+    u8g2.drawStr(0, 28, ip.c_str());
+    u8g2.sendBuffer();
+
+    // I2S init
+    initI2S();
+
+    // WebSocket
+    ws.begin(ECS_HOST, ECS_PORT, "/");
+    ws.onEvent(wsEvent);
+    ws.setReconnectInterval(5000);
+}
+
+void loop() {
+    ws.loop();
 }
