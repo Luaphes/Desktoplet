@@ -75,8 +75,8 @@ static void oled_init_seq() {
     oled_write_cmd(0xA8); oled_write_cmd(0x3F); // mux ratio
     oled_write_cmd(0xD3); oled_write_cmd(0x00); // display offset
     oled_write_cmd(0x40); // start line
-    oled_write_cmd(0xA1); // segment remap (column 127=SEG0)
-    oled_write_cmd(0xC8); // COM scan direction
+    oled_write_cmd(0xA0); // segment remap off (column 0=SEG0)
+    oled_write_cmd(0xC0); // COM scan normal (COM0→COM63)
     oled_write_cmd(0xDA); oled_write_cmd(0x12); // COM pins
     oled_write_cmd(0x81); oled_write_cmd(0x7F); // contrast
     oled_write_cmd(0xA4); // display on resume
