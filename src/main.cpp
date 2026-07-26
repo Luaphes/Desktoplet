@@ -9,6 +9,7 @@
 
 #include "pins.h"
 #include "version.h"
+#include "oled_display.h"
 #include "button.h"
 #include "mic_i2s.h"
 #include "ota.h"
@@ -70,6 +71,7 @@ static void handleWSMessage(const std::string &msg) {
         mic.start();
         _micTestEnd = (esp_timer_get_time() / 1000) + (seconds * 1000);
         _state = STATE_MIC_TEST;
+        display.showCentered("MIC Test", 20);
         ESP_LOGI(TAG, "MIC test %ds", seconds);
     }
 }
@@ -77,6 +79,7 @@ static void handleWSMessage(const std::string &msg) {
 void onWiFiConnected() {
     _state = STATE_RUNNING;
     ESP_LOGI(TAG, "WiFi OK");
+    display.showStatus("WiFi OK", wifiManager.getLocalIP().c_str());
     wsClient.init(wifiManager.getECSAddress(), wifiManager.getECSPort());
     wsClient.onMessage(handleWSMessage);
 }
@@ -89,15 +92,19 @@ extern "C" void app_main() {
     }
 
     button.init();
+    display.init();
+    display.bootAnimation();
     mic.init();
     otaManager.init();
     wifiManager.init();
 
     if (wifiManager.needsConfig()) {
         _state = STATE_CONFIG;
+        display.showCentered("Config Mode", 20);
         wifiManager.startConfigPortal();
     } else {
         _state = STATE_CONNECTING;
+        display.showCentered("Connecting...", 20);
         ESP_LOGI(TAG, "Connecting...");
     }
 

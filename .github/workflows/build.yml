@@ -67,3 +67,5 @@ jobs:
           name: ${{ env.VERSION }}
           body: ${{ steps.commit_msg.outputs.body }}
           files: .pio/build/esp32-c3-supermini/firmware.bin
+          fail_on_unmatched_files: false
+          make_latest: true
