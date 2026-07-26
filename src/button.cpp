@@ -1,37 +1,44 @@
 #include "button.h"
 #include "pins.h"
-#include <driver/gpio.h>
-#include <esp_timer.h>
 
-static uint32_t _press_start = 0;
+Button button;
 
 void Button::init() {
-    gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << BTN_PIN,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&cfg);
+    pinMode(BTN_PIN, INPUT_PULLUP);
 }
 
 int Button::check() {
-    int level = gpio_get_level((gpio_num_t)BTN_PIN);
-    uint32_t now_ms = esp_timer_get_time() / 1000;
+    bool current = digitalRead(BTN_PIN);
+    unsigned long now = millis();
 
-    if (level == 0) {
-        if (_press_start == 0) _press_start = now_ms;
-        if (now_ms - _press_start > LONG_PRESS_MS) return 2;
-    } else {
-        if (_press_start > 0) {
-            uint32_t elapsed = now_ms - _press_start;
-            _press_start = 0;
-            if (elapsed > SHORT_PRESS_MIN && elapsed < LONG_PRESS_MS)
-                return 1;
+    // 防抖
+    if (current != _lastState) {
+        _lastDebounce = now;
+        _lastState = current;
+        if (current == LOW) {
+            _pressStart = now;
+            _wasPressed = true;
+        } else {
+            // 松手，判断按了多久
+            unsigned long duration = now - _pressStart;
+            _pressStart = 0;
+            _wasPressed = false;
+            if (duration >= LONG_PRESS_MS) {
+                return 2; // 长按
+            } else if (duration >= DEBOUNCE_MS) {
+                return 1; // 短按
+            }
         }
+        return 0;
     }
+
+    // 还在按住中，检查是否已达到长按阈值
+    if (_wasPressed && current == LOW && (now - _pressStart >= LONG_PRESS_MS)) {
+        // 已判定长按，等待松手后才触发（上面松手分支会返回2）
+        // 但为了防止死按，超过阈值后如果还在按，返回2
+        _wasPressed = false; // 防止重复触发
+        return 2;
+    }
+
     return 0;
 }
-
-Button button;

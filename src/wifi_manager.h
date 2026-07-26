@@ -1,8 +1,7 @@
 #ifndef WIFI_MANAGER_H
 #define WIFI_MANAGER_H
 
-#include <string>
-#include <esp_event.h>
+#include <Arduino.h>
 
 class WiFiManager {
 public:
@@ -11,9 +10,9 @@ public:
     bool isConnected();
     bool needsConfig();
     void clearAndRestart();
-    std::string getLocalIP();
-    std::string getECSAddress();
-    uint16_t getECSPort();
+    String getECSAddress();
+    int getECSPort();
+    String getLocalIP();
 };
 
 extern WiFiManager wifiManager;

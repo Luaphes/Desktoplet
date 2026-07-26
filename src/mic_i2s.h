@@ -1,7 +1,7 @@
 #ifndef MIC_I2S_H
 #define MIC_I2S_H
 
-#include <stdint.h>
+#include <Arduino.h>
 
 class MicI2S {
 public:
