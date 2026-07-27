@@ -213,9 +213,11 @@ void setup() {
     // Display status
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(0, 12, "WiFi OK");
+    int tw = u8g2.getStrWidth("WiFi OK");
+    u8g2.drawStr((128 - tw) / 2, 14, "WiFi OK");
     String ip = WiFi.localIP().toString();
-    u8g2.drawStr(0, 28, ip.c_str());
+    int iw = u8g2.getStrWidth(ip.c_str());
+    u8g2.drawStr((128 - iw) / 2, 34, ip.c_str());
     drawVersionCorner();
     u8g2.sendBuffer();
 
@@ -291,8 +293,11 @@ void loop() {
             // Restore WiFi OK display
             u8g2.clearBuffer();
             u8g2.setFont(u8g2_font_ncenB08_tr);
-            u8g2.drawStr(0, 12, "WiFi OK");
-            u8g2.drawStr(0, 28, WiFi.localIP().toString().c_str());
+            int tw2 = u8g2.getStrWidth("WiFi OK");
+            u8g2.drawStr((128 - tw2) / 2, 14, "WiFi OK");
+            String rip = WiFi.localIP().toString();
+            int iw2 = u8g2.getStrWidth(rip.c_str());
+            u8g2.drawStr((128 - iw2) / 2, 34, rip.c_str());
             drawVersionCorner();
             u8g2.sendBuffer();
         } else {
