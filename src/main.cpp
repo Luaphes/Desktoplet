@@ -90,16 +90,17 @@ void setup() {
     Serial.begin(115200);
     prefs.begin("desktoppy", false);
 
-    // OLED
+    // Boot animation — Hermes logo
     u8g2.begin();
     u8g2.setFlipMode(0);
     u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB14_tr);
-    u8g2.drawStr(8, 36, "Link Start!");
+    u8g2.setFont(u8g2_font_ncenB24_tr);
+    int tw = u8g2.getStrWidth("HERMES");
+    u8g2.drawStr((128 - tw) / 2, 42, "HERMES");
     u8g2.setFont(u8g2_font_ncenB08_tr);
     u8g2.drawStr(104, 60, FIRMWARE_VERSION);
     u8g2.sendBuffer();
-    delay(1500);
+    delay(2000);
 
     // WiFi
     u8g2.clearBuffer();
