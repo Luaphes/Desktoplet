@@ -68,6 +68,24 @@ void drawVersionCorner() {
     u8g2.drawStr(x, y, FIRMWARE_VERSION);
 }
 
+// ---- OTA progress callback ----
+void otaProgress(int cur, int total) {
+    if (total <= 0) return;
+    int pct = (cur * 100) / total;
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.drawStr(0, 12, "OTA Update");
+    u8g2.drawFrame(10, 24, 108, 16);
+    int fw = pct * 104 / 100;
+    if (fw > 0) u8g2.drawBox(12, 26, fw, 12);
+    char buf[16];
+    sprintf(buf, "%d%%", pct);
+    u8g2.setCursor((128 - u8g2.getStrWidth(buf)) / 2, 56);
+    u8g2.print(buf);
+    drawVersionCorner();
+    u8g2.sendBuffer();
+}
+
 // ---- WS Event ----
 void wsEvent(WStype_t type, uint8_t *data, size_t len) {
     if (type == WStype_TEXT) {
@@ -79,17 +97,22 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
                 u += 7;
                 int e = msg.indexOf("\"", u);
                 String url = msg.substring(u, e);
-            // OTA via WiFiClient
+            // OTA via HTTPUpdate (with progress bar)
             WiFiClient client;
-            u8g2.clearBuffer();
-            u8g2.setFont(u8g2_font_ncenB08_tr);
-            u8g2.drawStr(0, 30, "OTA Update...");
-            drawVersionCorner();
-            u8g2.sendBuffer();
-            t_httpUpdate_return ret = httpUpdate.update(client, url);
-                if (ret == HTTP_UPDATE_OK) {
-                    ESP.restart();
-                }
+            HTTPUpdate updater;
+            updater.onProgress(otaProgress);
+            t_httpUpdate_return ret = updater.update(client, url);
+            if (ret == HTTP_UPDATE_OK) {
+                ESP.restart();
+            } else {
+                const char *err = (ret == HTTP_UPDATE_FAILED) ? "OTA Failed" : "No Update";
+                u8g2.clearBuffer();
+                u8g2.setFont(u8g2_font_ncenB08_tr);
+                u8g2.drawStr(0, 28, err);
+                drawVersionCorner();
+                u8g2.sendBuffer();
+                delay(3000);
+            }
             }
         } else if (msg.indexOf("\"display\"") >= 0) {
             int t = msg.indexOf("\"text\":\"");
