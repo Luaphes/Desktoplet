@@ -28,7 +28,7 @@ void initI2S() {
         .sample_rate = 16000,
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_I2S,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = 0,
         .dma_buf_count = 4,
         .dma_buf_len = 64,
@@ -69,11 +69,13 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
                 u += 7;
                 int e = msg.indexOf("\"", u);
                 String url = msg.substring(u, e);
-                u8g2.clearBuffer();
-                u8g2.setFont(u8g2_font_ncenB08_tr);
-                u8g2.drawStr(0, 30, "OTA Update...");
-                u8g2.sendBuffer();
-                t_httpUpdate_return ret = httpUpdate.update(ws, url);
+            // OTA via WiFiClient
+            WiFiClient client;
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            u8g2.drawStr(0, 30, "OTA Update...");
+            u8g2.sendBuffer();
+            t_httpUpdate_return ret = httpUpdate.update(client, url);
                 if (ret == HTTP_UPDATE_OK) {
                     ESP.restart();
                 }
