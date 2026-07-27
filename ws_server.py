@@ -132,16 +132,28 @@ async def handler(websocket):
         else:
             remaining.append(item)
     _cmd_queue = remaining
+    # Unique filename for this session's audio
+    audio_file = f"/tmp/esp32_audio_{cid}_{int(time.time())}.raw"
     try:
         async for message in websocket:
-            data = json.loads(message)
-            print(f"[ESP32:{cid}] {json.dumps(data, ensure_ascii=False)}")
-            if data.get("type") == "btn_click":
-                global _last_btn_time
-                now = time.time()
-                if now - _last_btn_time > 3:
-                    _last_btn_time = now
-                    await _restore_display()
+            if isinstance(message, bytes):
+                # Binary = I2S audio stream
+                with open(audio_file, "ab") as f:
+                    f.write(message)
+            else:
+                data = json.loads(message)
+                print(f"[ESP32:{cid}] {json.dumps(data, ensure_ascii=False)}")
+                if data.get("type") == "btn_click":
+                    global _last_btn_time
+                    now = time.time()
+                    if now - _last_btn_time > 3:
+                        _last_btn_time = now
+                        await _restore_display()
+                elif data.get("type") == "mic_start":
+                    print(f"[AUDIO] ESP32 {cid} streaming to {audio_file}")
+                elif data.get("type") == "mic_stop":
+                    size = os.path.getsize(audio_file) if os.path.exists(audio_file) else 0
+                    print(f"[AUDIO] ESP32 {cid} stopped, {size} bytes saved to {audio_file}")
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

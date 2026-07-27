@@ -24,6 +24,7 @@ const char *OTA_PATH = "/firmware.bin";
 #define I2S_WS   2
 #define I2S_SCK  3
 #define I2S_SD   4
+#define BTN_PIN  0
 
 void initI2S() {
     i2s_config_t cfg = {
@@ -140,6 +141,7 @@ void setup() {
 
     // I2S init
     initI2S();
+    pinMode(BTN_PIN, INPUT_PULLUP);
 
     // WebSocket
     ws.begin(ECS_HOST, ECS_PORT, "/");
@@ -149,6 +151,33 @@ void setup() {
 
 void loop() {
     ws.loop();
+    
+    // Button-triggered I2S streaming
+    static bool btnHeld = false;
+    static unsigned long btnDown = 0;
+    bool pressed = (digitalRead(BTN_PIN) == LOW);
+    
+    if (pressed && !btnHeld && btnDown == 0) {
+        btnDown = millis();
+    } else if (pressed && !btnHeld && millis() - btnDown > 100) {
+        btnHeld = true;
+        ws.sendTXT("{\"type\":\"mic_start\"}");
+    } else if (!pressed) {
+        if (btnHeld) ws.sendTXT("{\"type\":\"mic_stop\"}");
+        btnHeld = false;
+        btnDown = 0;
+    }
+    
+    if (btnHeld) {
+        int16_t buf[128];
+        size_t bytes = 0;
+        i2s_read(I2S_NUM_0, buf, sizeof(buf), &bytes, 0);
+        if (bytes > 0) {
+            ws.sendBIN((uint8_t*)buf, bytes);
+        }
+    }
+    
+    // mic_test via WS command (non-blocking)
     if (micTestActive) {
         if (millis() >= micTestEnd) {
             micTestActive = false;
