@@ -39,7 +39,7 @@ void initI2S() {
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = 0,
-        .dma_buf_count = 4,
+        .dma_buf_count = 6,
         .dma_buf_len = 64,
         .use_apll = false,
     };
@@ -130,6 +130,7 @@ void setup() {
     u8g2.drawStr(70, 30, "Desktoppy");
     drawVersionCorner();
     u8g2.sendBuffer();
+    delay(1500);
 
     // ---- Hold BTN 3s to reset WiFi ----
     pinMode(BTN_PIN, INPUT_PULLUP);
@@ -237,6 +238,26 @@ void loop() {
         if (bytes > 0) {
             ws.sendBIN((uint8_t*)buf, bytes);
         }
+        // Volume bar on OLED
+        int samples = bytes / 2;
+        int32_t sum = 0;
+        for (int i = 0; i < samples; i++) {
+            int32_t v = buf[i]; if (v < 0) v = -v;
+            sum += v;
+        }
+        int vol = samples ? (sum / samples) * 100 / 8192 : 0;
+        if (vol > 100) vol = 100;
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.drawStr(0, 12, "REC");
+        u8g2.drawFrame(10, 24, 108, 16);
+        int fw = vol * 104 / 100;
+        if (fw > 0) u8g2.drawBox(12, 26, fw, 12);
+        char p[8]; sprintf(p, "%d%%", vol);
+        u8g2.setCursor((128 - u8g2.getStrWidth(p)) / 2, 56);
+        u8g2.print(p);
+        drawVersionCorner();
+        u8g2.sendBuffer();
     }
     
     // mic_test via WS command (non-blocking)
