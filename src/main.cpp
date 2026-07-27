@@ -6,6 +6,7 @@
 #include <U8g2lib.h>
 #include <driver/i2s.h>
 #include <Preferences.h>
+#include "hermes_logo.h"
 
 // ---- OLED (SSD1315 via U8g2 HW I2C) ----
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
@@ -15,6 +16,10 @@ WebSocketsClient ws;
 Preferences prefs;
 bool micTestActive = false;
 unsigned long micTestEnd = 0;
+
+// ---- OLED burn-in prevention: corner rotation ----
+static int g_verCorner = 3;              // 0=TL 1=TR 2=BL 3=BR
+static unsigned long g_verNextJump = 0;
 
 const char *ECS_HOST = "118.31.46.156";
 const uint16_t ECS_PORT = 8765;
@@ -49,6 +54,20 @@ void initI2S() {
     i2s_start(I2S_NUM_0);
 }
 
+// ---- Version display (burn-in safe: 30min corner rotation) ----
+void drawVersionCorner() {
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    int tw = u8g2.getStrWidth(FIRMWARE_VERSION);
+    int x, y;
+    switch (g_verCorner) {
+        case 0: x = 2;               y = 8;  break;  // TL
+        case 1: x = 128 - tw - 2;    y = 8;  break;  // TR
+        case 2: x = 2;               y = 64; break;  // BL
+        case 3: x = 128 - tw - 2;    y = 64; break;  // BR
+    }
+    u8g2.drawStr(x, y, FIRMWARE_VERSION);
+}
+
 // ---- WS Event ----
 void wsEvent(WStype_t type, uint8_t *data, size_t len) {
     if (type == WStype_TEXT) {
@@ -65,6 +84,7 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
             u8g2.clearBuffer();
             u8g2.setFont(u8g2_font_ncenB08_tr);
             u8g2.drawStr(0, 30, "OTA Update...");
+            drawVersionCorner();
             u8g2.sendBuffer();
             t_httpUpdate_return ret = httpUpdate.update(client, url);
                 if (ret == HTTP_UPDATE_OK) {
@@ -83,6 +103,7 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
             u8g2.setFont(u8g2_font_ncenB08_tr);
             int tw = u8g2.getStrWidth(text.c_str());
             u8g2.drawStr((128 - tw) / 2, 32, text.c_str());
+            drawVersionCorner();
             u8g2.sendBuffer();
         } else if (msg.indexOf("\"mic_test\"") >= 0) {
             // MIC test: set flag, main loop handles to avoid blocking WS
@@ -100,17 +121,50 @@ void setup() {
     Serial.begin(115200);
     prefs.begin("desktoppy", false);
 
-    // Boot animation — Hermes logo
+    // Boot animation — Hermes logo (64x64) + Desktoppy label
     u8g2.begin();
     u8g2.setFlipMode(0);
     u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB24_tr);
-    int tw = u8g2.getStrWidth("HERMES");
-    u8g2.drawStr((128 - tw) / 2, 42, "HERMES");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(104, 60, FIRMWARE_VERSION);
+    u8g2.drawXBM(0, 0, 64, 64, hermes_logo);
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(70, 30, "Desktoppy");
+    drawVersionCorner();
     u8g2.sendBuffer();
-    delay(2000);
+
+    // ---- Hold BTN 3s to reset WiFi ----
+    pinMode(BTN_PIN, INPUT_PULLUP);
+    {
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.drawStr(0, 20, "Hold BTN 3s");
+        u8g2.drawStr(0, 36, "to reset WiFi");
+        drawVersionCorner();
+        u8g2.sendBuffer();
+
+        unsigned long t0 = millis();
+        bool resetWiFi = false;
+        while (millis() - t0 < 5000) {
+            if (digitalRead(BTN_PIN) == LOW) {
+                unsigned long held = millis();
+                while (digitalRead(BTN_PIN) == LOW) {
+                    if (millis() - held > 3000) { resetWiFi = true; break; }
+                    delay(10);
+                }
+                if (resetWiFi) break;
+            }
+            delay(10);
+        }
+        if (resetWiFi) {
+            prefs.remove("ssid");
+            prefs.remove("pass");
+            u8g2.clearBuffer();
+            u8g2.drawStr(0, 28, "WiFi Reset OK");
+            drawVersionCorner();
+            u8g2.sendBuffer();
+            delay(2000);
+            ESP.restart();
+        }
+    }
 
     // WiFi
     u8g2.clearBuffer();
@@ -118,6 +172,7 @@ void setup() {
     u8g2.drawStr(0, 20, "WiFi Config");
     u8g2.drawStr(0, 36, "Connect to:");
     u8g2.drawStr(0, 52, "ESP32-Config");
+    drawVersionCorner();
     u8g2.sendBuffer();
     
     WiFiManager wm;
@@ -137,6 +192,7 @@ void setup() {
     u8g2.drawStr(0, 12, "WiFi OK");
     String ip = WiFi.localIP().toString();
     u8g2.drawStr(0, 28, ip.c_str());
+    drawVersionCorner();
     u8g2.sendBuffer();
 
     // I2S init
@@ -151,6 +207,12 @@ void setup() {
 
 void loop() {
     ws.loop();
+    
+    // 30min corner rotation (OLED burn-in prevention)
+    if (millis() - g_verNextJump > 30 * 60 * 1000UL) {
+        g_verCorner = (g_verCorner + 1) % 4;
+        g_verNextJump = millis();
+    }
     
     // Button-triggered I2S streaming
     static bool btnHeld = false;
@@ -187,6 +249,7 @@ void loop() {
             u8g2.setFont(u8g2_font_ncenB08_tr);
             u8g2.drawStr(0, 12, "WiFi OK");
             u8g2.drawStr(0, 28, WiFi.localIP().toString().c_str());
+            drawVersionCorner();
             u8g2.sendBuffer();
         } else {
             int16_t buf[64];
@@ -209,6 +272,7 @@ void loop() {
             char p[8]; sprintf(p, "%d%%", vol);
             u8g2.setCursor((128 - u8g2.getStrWidth(p)) / 2, 56);
             u8g2.print(p);
+            drawVersionCorner();
             u8g2.sendBuffer();
         }
     }

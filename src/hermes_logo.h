@@ -40,9 +40,10 @@ static const unsigned char PROGMEM hermes_logo[] = {
     0xfe, 0x3f, 0x40, 0x7d, 0xfb, 0xff, 0xff, 0x7f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-// Display the logo centered on the OLED
-static inline void showHermesLogo() {
-    display.drawBitmap(32, 0, 64, 64, hermes_logo);
-}
+// NOTE: showHermesLogo uses OLEDDisplay which is excluded from build.
+// Use u8g2.drawXBM(0, 0, 64, 64, hermes_logo) in main.cpp instead.
+// static inline void showHermesLogo() {
+//     display.drawBitmap(32, 0, 64, 64, hermes_logo);
+// }
 
 #endif // HERMES_LOGO_H
