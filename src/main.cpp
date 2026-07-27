@@ -13,6 +13,8 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 // ---- WebSocket ----
 WebSocketsClient ws;
 Preferences prefs;
+bool micTestActive = false;
+unsigned long micTestEnd = 0;
 
 const char *ECS_HOST = "118.31.46.156";
 const uint16_t ECS_PORT = 8765;
@@ -82,35 +84,12 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
             u8g2.drawStr((128 - tw) / 2, 32, text.c_str());
             u8g2.sendBuffer();
         } else if (msg.indexOf("\"mic_test\"") >= 0) {
-            // MIC test: read I2S for 5s, show live volume bar
+            // MIC test: set flag, main loop handles to avoid blocking WS
             int dur = 5;
             int d = msg.indexOf("\"duration\":");
             if (d >= 0) dur = msg.substring(d + 11).toInt();
-            unsigned long end = millis() + dur * 1000;
-            while (millis() < end) {
-                int16_t buf[64];
-                size_t bytes = 0;
-                i2s_read(I2S_NUM_0, buf, sizeof(buf), &bytes, portMAX_DELAY);
-                int samples = bytes / 2;
-                int32_t sum = 0;
-                for (int i = 0; i < samples; i++) {
-                    int32_t v = buf[i]; if (v < 0) v = -v;
-                    sum += v;
-                }
-                int vol = samples ? (sum / samples) * 100 / 8192 : 0;
-                if (vol > 100) vol = 100;
-                u8g2.clearBuffer();
-                u8g2.setFont(u8g2_font_ncenB08_tr);
-                u8g2.drawStr(0, 12, "MIC Test");
-                u8g2.drawFrame(10, 24, 108, 16);
-                int fw = vol * 104 / 100;
-                if (fw > 0) u8g2.drawBox(12, 26, fw, 12);
-                char p[8]; sprintf(p, "%d%%", vol);
-                u8g2.setCursor((128 - u8g2.getStrWidth(p)) / 2, 56);
-                u8g2.print(p);
-                u8g2.sendBuffer();
-            }
-            ws.sendTXT("{\"type\":\"mic_done\"}");
+            micTestEnd = millis() + dur * 1000;
+            micTestActive = true;
         }
         ws.sendTXT("{\"type\":\"ack\"}");
     }
@@ -170,4 +149,38 @@ void setup() {
 
 void loop() {
     ws.loop();
+    if (micTestActive) {
+        if (millis() >= micTestEnd) {
+            micTestActive = false;
+            ws.sendTXT("{\"type\":\"mic_done\"}");
+            // Restore WiFi OK display
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            u8g2.drawStr(0, 12, "WiFi OK");
+            u8g2.drawStr(0, 28, WiFi.localIP().toString().c_str());
+            u8g2.sendBuffer();
+        } else {
+            int16_t buf[64];
+            size_t bytes = 0;
+            i2s_read(I2S_NUM_0, buf, sizeof(buf), &bytes, 0);
+            int samples = bytes / 2;
+            int32_t sum = 0;
+            for (int i = 0; i < samples; i++) {
+                int32_t v = buf[i]; if (v < 0) v = -v;
+                sum += v;
+            }
+            int vol = samples ? (sum / samples) * 100 / 8192 : 0;
+            if (vol > 100) vol = 100;
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            u8g2.drawStr(0, 12, "MIC Test");
+            u8g2.drawFrame(10, 24, 108, 16);
+            int fw = vol * 104 / 100;
+            if (fw > 0) u8g2.drawBox(12, 26, fw, 12);
+            char p[8]; sprintf(p, "%d%%", vol);
+            u8g2.setCursor((128 - u8g2.getStrWidth(p)) / 2, 56);
+            u8g2.print(p);
+            u8g2.sendBuffer();
+        }
+    }
 }
