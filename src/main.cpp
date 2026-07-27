@@ -5,7 +5,6 @@
 #include <HTTPUpdate.h>
 #include <U8g2lib.h>
 #include <driver/i2s.h>
-#include <Preferences.h>
 #include "hermes_logo.h"
 
 // ---- OLED (SSD1315 via U8g2 HW I2C) ----
@@ -13,7 +12,6 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
 // ---- WebSocket ----
 WebSocketsClient ws;
-Preferences prefs;
 bool micTestActive = false;
 unsigned long micTestEnd = 0;
 
@@ -132,7 +130,6 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
 
 void setup() {
     Serial.begin(115200);
-    prefs.begin("desktoppy", false);
 
     // Boot animation — Hermes logo (64x64) + Desktoppy label
     u8g2.begin();
@@ -169,8 +166,8 @@ void setup() {
             delay(10);
         }
         if (resetWiFi) {
-            prefs.remove("ssid");
-            prefs.remove("pass");
+            WiFiManager wmReset;
+            wmReset.resetSettings();
             u8g2.clearBuffer();
             u8g2.drawStr(0, 28, "WiFi Reset OK");
             drawVersionCorner();
@@ -183,22 +180,18 @@ void setup() {
     // WiFi
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(0, 20, "WiFi Config");
-    u8g2.drawStr(0, 36, "Connect to:");
-    u8g2.drawStr(0, 52, "ESP32-Config");
+    u8g2.drawStr(0, 20, "Connecting...");
     drawVersionCorner();
     u8g2.sendBuffer();
     
     WiFiManager wm;
     wm.setConfigPortalTimeout(180);
+    wm.setWiFiAutoReconnect(true);
     if (!wm.autoConnect("ESP32-Config")) {
-        // timeout, restart and retry
         ESP.restart();
     }
 
-    // Connected — save to prefs for next boot
-    prefs.putString("ssid", WiFi.SSID());
-    prefs.putString("pass", WiFi.psk());
+    // WiFiManager saves credentials internally, no need for manual prefs
 
     // Display status
     u8g2.clearBuffer();
