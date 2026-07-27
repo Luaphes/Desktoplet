@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <WebSocketsClient.h>
 #include <HTTPUpdate.h>
 #include <U8g2lib.h>
@@ -43,19 +44,6 @@ void initI2S() {
     };
     i2s_set_pin(I2S_NUM_0, &pin);
     i2s_start(I2S_NUM_0);
-}
-
-// ---- WiFi ----
-bool connectWiFi() {
-    String ssid = prefs.getString("ssid", "");
-    String pass = prefs.getString("pass", "");
-    if (ssid.isEmpty()) return false;
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 30) {
-        delay(1000); tries++;
-    }
-    return WiFi.status() == WL_CONNECTED;
 }
 
 // ---- WS Event ----
@@ -114,31 +102,23 @@ void setup() {
     delay(1500);
 
     // WiFi
-    if (!connectWiFi()) {
-        // Config mode via serial
-        u8g2.clearBuffer();
-        u8g2.setFont(u8g2_font_ncenB08_tr);
-        u8g2.drawStr(0, 12, "No WiFi saved");
-        u8g2.drawStr(0, 28, "Use Serial:");
-        u8g2.drawStr(0, 44, "ssid:xxx pass:yyy");
-        u8g2.sendBuffer();
-        while (!WiFi.isConnected()) {
-            if (Serial.available()) {
-                String cmd = Serial.readStringUntil('\n');
-                if (cmd.startsWith("ssid:")) {
-                    cmd.remove(0, 5);
-                    int sp = cmd.indexOf(" pass:");
-                    String s = cmd.substring(0, sp);
-                    String p = cmd.substring(sp + 6);
-                    prefs.putString("ssid", s);
-                    prefs.putString("pass", p);
-                    WiFi.begin(s.c_str(), p.c_str());
-                }
-            }
-            delay(100);
-        }
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.drawStr(0, 20, "WiFi Config");
+    u8g2.drawStr(0, 36, "Connect to:");
+    u8g2.drawStr(0, 52, "ESP32-Config");
+    u8g2.sendBuffer();
+    
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(180);
+    if (!wm.autoConnect("ESP32-Config")) {
+        // timeout, restart and retry
         ESP.restart();
     }
+
+    // Connected — save to prefs for next boot
+    prefs.putString("ssid", WiFi.SSID());
+    prefs.putString("pass", WiFi.psk());
 
     // Display status
     u8g2.clearBuffer();
