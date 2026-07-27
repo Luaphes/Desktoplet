@@ -17,6 +17,10 @@ Preferences prefs;
 bool micTestActive = false;
 unsigned long micTestEnd = 0;
 
+// ---- Deferred OTA (processed in loop, not WS callback) ----
+bool otaPending = false;
+String otaUrl = "";
+
 // ---- OLED burn-in prevention: corner rotation ----
 static int g_verCorner = 3;              // 0=TL 1=TR 2=BL 3=BR
 static unsigned long g_verNextJump = 0;
@@ -97,22 +101,8 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
                 u += 7;
                 int e = msg.indexOf("\"", u);
                 String url = msg.substring(u, e);
-            // OTA via HTTPUpdate (with progress bar)
-            WiFiClient client;
-            HTTPUpdate updater;
-            updater.onProgress(otaProgress);
-            t_httpUpdate_return ret = updater.update(client, url);
-            if (ret == HTTP_UPDATE_OK) {
-                ESP.restart();
-            } else {
-                const char *err = (ret == HTTP_UPDATE_FAILED) ? "OTA Failed" : "No Update";
-                u8g2.clearBuffer();
-                u8g2.setFont(u8g2_font_ncenB08_tr);
-                u8g2.drawStr(0, 28, err);
-                drawVersionCorner();
-                u8g2.sendBuffer();
-                delay(3000);
-            }
+                otaPending = true;
+                otaUrl = url;
             }
         } else if (msg.indexOf("\"display\"") >= 0) {
             int t = msg.indexOf("\"text\":\"");
@@ -233,6 +223,27 @@ void setup() {
 
 void loop() {
     ws.loop();
+    
+    // ---- Deferred OTA (non-blocking flag, actual download here) ----
+    if (otaPending) {
+        WiFiClient client;
+        HTTPUpdate updater;
+        updater.onProgress(otaProgress);
+        t_httpUpdate_return ret = updater.update(client, otaUrl);
+        if (ret == HTTP_UPDATE_OK) {
+            ESP.restart();
+        } else {
+            const char *err = (ret == HTTP_UPDATE_FAILED) ? "OTA Failed" : "No Update";
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            u8g2.drawStr(0, 28, err);
+            drawVersionCorner();
+            u8g2.sendBuffer();
+            delay(3000);
+        }
+        otaPending = false;
+        otaUrl = "";
+    }
     
     // 30min corner rotation (OLED burn-in prevention)
     if (millis() - g_verNextJump > 30 * 60 * 1000UL) {
