@@ -262,7 +262,19 @@ void loop() {
         btnHeld = true;
         ws.sendTXT("{\"type\":\"mic_start\"}");
     } else if (!pressed) {
-        if (btnHeld) ws.sendTXT("{\"type\":\"mic_stop\"}");
+        if (btnHeld) {
+            ws.sendTXT("{\"type\":\"mic_stop\"}");
+            // Restore WiFi OK display
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            int tw3 = u8g2.getStrWidth("WiFi OK");
+            u8g2.drawStr((128 - tw3) / 2, 14, "WiFi OK");
+            String rip = WiFi.localIP().toString();
+            int iw3 = u8g2.getStrWidth(rip.c_str());
+            u8g2.drawStr((128 - iw3) / 2, 34, rip.c_str());
+            drawVersionCorner();
+            u8g2.sendBuffer();
+        }
         btnHeld = false;
         btnDown = 0;
     }
