@@ -286,7 +286,7 @@ void loop() {
             int32_t v = buf[i]; if (v < 0) v = -v;
             sum += v;
         }
-        int vol = samples ? (sum / samples) * 100 / 8192 : 0;
+        int vol = samples ? (sum / samples) * 100 / 256 : 0;
         if (vol > 100) vol = 100;
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_ncenB08_tr);
@@ -326,7 +326,7 @@ void loop() {
                 int32_t v = buf[i]; if (v < 0) v = -v;
                 sum += v;
             }
-            int vol = samples ? (sum / samples) * 100 / 8192 : 0;
+            int vol = samples ? (sum / samples) * 100 / 256 : 0;
             if (vol > 100) vol = 100;
             u8g2.clearBuffer();
             u8g2.setFont(u8g2_font_ncenB08_tr);
