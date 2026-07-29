@@ -3,6 +3,7 @@
 #include <WiFiManager.h>
 #include <WebSocketsClient.h>
 #include <HTTPUpdate.h>
+#include <WiFiClientSecure.h>
 #include <U8g2lib.h>
 #include <driver/i2s.h>
 #include "hermes_logo.h"
@@ -219,7 +220,8 @@ void loop() {
     
     // ---- Deferred OTA (non-blocking flag, actual download here) ----
     if (otaPending) {
-        WiFiClient client;
+        WiFiClientSecure client;
+        client.setInsecure();  // skip CA check for trusted GitHub CDN
         HTTPUpdate updater;
         updater.onProgress(otaProgress);
         t_httpUpdate_return ret = updater.update(client, otaUrl);
