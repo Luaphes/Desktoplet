@@ -17,9 +17,11 @@ ESP32-C3 ──WebSocket──→ ws_server.py (nohup, nohup.out)
 
 ```
 ESP32-C3 ──WebSocket──→ despod (systemd 托管)
-                            │
-                  REST API (POST /cmd/ota 等)
-                  journald (实时日志，不缓冲)
+                             │
+                   REST API (POST /cmd/ota 等)
+                   journald (实时日志，不缓冲)
+                   │
+                   └── OTA 固件: ESP32 WiFiClientSecure → GitHub CDN 直连
 ```
 
 **改动：**

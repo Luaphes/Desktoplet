@@ -37,6 +37,7 @@
 ## 待验证
 
 - [ ] OTA 全链路（GitHub Actions → Release → OTA 指令 → ESP32 下载更新）
+- [x] OTA 全链路（WiFiClientSecure → GitHub CDN 直连 + 进度条 + 失败显示 + 自动回退）✅ v96
 - [ ] 初号机 OUT- 焊点修好后电源稳定性
 
 ## P2（长期）
