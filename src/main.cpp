@@ -4,6 +4,7 @@
 #include <WebSocketsClient.h>
 #include <HTTPUpdate.h>
 #include <WiFiClientSecure.h>
+#include <esp_ota_ops.h>
 #include <U8g2lib.h>
 #include <driver/i2s.h>
 #include "hermes_logo.h"
@@ -213,6 +214,9 @@ void setup() {
     ws.begin(ECS_HOST, ECS_PORT, "/");
     ws.onEvent(wsEvent);
     ws.setReconnectInterval(5000);
+
+    // OTA rollback: confirm this firmware is stable
+    esp_ota_mark_app_valid_cancel_rollback();
 }
 
 void loop() {
