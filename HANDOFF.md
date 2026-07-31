@@ -1,46 +1,73 @@
-# Handoff — ESP32 Desktoppy Arduino Migration 完成
+# Handoff — OTA 鲁棒性 + 系统稳定性治理 (v96)
 
-## 最终状态
+## 本轮完成
 
-v86 固件，Arduino 框架，基础管线全通：
+### OTA 架构升级 (v87 → v96)
 
-| 模块 | 方案 | 状态 |
+| 版本 | 改动 | 效果 |
 |------|------|------|
-| OLED | U8g2 SSD1306 HW I2C | ✅ 正常显示 |
-| WiFi | WiFiManager captive portal | ✅ "ESP32-Config" AP |
-| WebSocket | links2004 WebSocketsClient | ✅ 收发全通 + ack |
-| OTA | Arduino httpUpdate | ✅ 从 ECS HTTP server 拉 |
-| I2S | 老 API i2s_driver_install | ✅ 连续流不卡网 |
-| 按键录音 | GPIO 0 INPUT_PULLUP | ✅ 按住→WS 二进制帧上传 |
+| v87 | 版本角标 + 四角轮跳 | OLED 右下角常驻固件版本 |
+| v87 | 按住 BTN 3s WiFi 重置 | 配网入口 |
+| v88 | DMA buffer 4→6 | 减少音频丢帧（仍有 95% 丢失） |
+| v88 | 按键录音 OLED 音量条 | "REC" + 进度条显示 |
+| v89 | OTA 进度条 (HTTPUpdate.onProgress) | 下载时显示百分比 |
+| v90 | WiFi OK + IP 居中显示 | UI 优化 |
+| v91 | OTA 延迟到 loop() | 不在 WS 回调里阻塞，解决 OTA 超时 |
+| v92 | 松手恢复 WiFi OK 画面 | 不再卡在 REC 画面 |
+| v93 | WiFiManager 内部存储 | 移除 Preferences 依赖 |
+| v94 | 音量阈值 8192→256 | INMP441 低电平适配 |
+| v95 | WiFiClient → WiFiClientSecure | ESP32 HTTPS 直连 GitHub CDN |
+| v96 | esp_ota_mark_app_valid_cancel_rollback() | 新固件崩了自动回退旧版本 |
 
-## 当前固件
+### 后端稳定性
 
-- v86 commit `957e34f`
-- 仓库：`Luaphes/Desktoppy`（main 分支）
-- platformio.ini：`esp32-c3-supermini` 环境，`framework = arduino`
-- 按键录音逻辑：`main.cpp` loop() 里 `btnHeld` 状态机
-- WS 服务端：`ws_server.py`（支持二进制帧，保存为 `/tmp/esp32_audio_*.raw`）
+- ws_server → **systemd 托管** (`despod.service`)
+  - 崩溃自动重启（6 秒恢复）
+  - 日志走 journald，实时不缓冲
+  - `systemctl status despod` 随时查状态
 
-## 下一阶段（新 session #92）
+### 文档
 
-1. OTA v86 到 ESP32
-2. 按住 GPIO 0 对麦克风说话 10s，松手
-3. ECS 上确认 `/tmp/esp32_audio_*.raw` 有数据
-4. STT：16kHz 16bit PCM raw → 语音识别（Whisper / 飞书 STT / DeepSeek）
-5. Agent 推理：用户语音意图 → LLM 处理 → 生成回复文本
-6. 回复下发：`{"type":"display","text":"..."}` 到 ESP32 OLED
-7. TTS 发声：文本 → 语音合成 → 下发给 ESP32 喇叭播放
+- `ARCHITECTURE.md` — v1→v4 架构演进路径
+- `FIXME.md` — OTA 全链路标记为 ✅
 
-## 关键路径
+---
 
-- OTA 固件源：`https://github.com/Luaphes/Desktoppy/releases/download/vXX/firmware.bin`
-- ghproxy 镜像（ECS 下不动 GitHub CDN 时）：`https://ghproxy.net/https://github.com/...`
-- WS 命令格式：`{"type":"ota","url":"http://118.31.46.156:23717/firmware.bin"}`
-- 音频格式：16kHz 16bit mono PCM raw（无 header）
+## 当前状态
 
-## 注意事项
+```
+板子: ESP32-C3 SuperMini
+固件: v93（卡在线上，v96 推了但 OTA 刷不上去）
+服务: ✅ systemd 稳定运行 1 天+
+```
 
-- 不要在 WS 回调里做阻塞 I2S 操作——用标志位 + loop() 模式
-- OTA 固件先下载到 ECS（`/root/esp32-firmware/firmware.bin`），用 HTTP server 23717 端口分发
-- ws_server 重启命令：`fuser -k 8765/tcp` 然后 `cd /root/esp32-firmware && python3 ws_server.py`
-- ESP32 GPIO：0=按键, 2=WS, 3=SCK, 4=SD, 8=SCL, 10=SDA
+## 阻塞问题
+
+**ESP32 反复崩溃重启**（所有 v87+ 版本共有）：
+
+```
+连接 30-80s → 崩溃 → 重启 → WiFiManager 磨蹭几分钟 → 重连
+```
+
+OTA 下载需要 38s+（ghproxy→ECS→ESP32），刚好掉在崩溃窗口里 → OTA 永远刷不上去。
+
+疑因：单核 C3 的内存碎片 / I2S DMA 冲突 / 看门狗
+定位：需要串口日志
+
+## 下一轮要做
+
+1. **排查崩溃根因** — 接串口看 panichandler 输出
+2. **OTA v96 上去** — 一旦 ESP32 稳定，立刻 OTA
+3. **验证回退** — 故意刷坏固件，确认能自动回退
+4. **音量问题** — INMP441 +30dB 才能听清
+
+## 关键数据
+
+```
+固件仓库: Luaphes/Desktoppy (main)
+分区表: partitions_ota.csv (app0 1.75MB + app1 1.75MB + otadata)
+OTA 架构: ESP32 WiFiClientSecure → GitHub CDN 直连（不走 ECS）
+WS 端口: 118.31.46.156:8765 (despod systemd)
+HTTP: 118.31.46.156:23717 (python http.server)
+音频: INMP441 16kHz 16bit mono PCM, /tmp/esp32_audio_*.raw
+```
