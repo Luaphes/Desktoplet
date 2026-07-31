@@ -1,86 +1,93 @@
-# Desktoppy 后端架构演进路径
+# Desktoppy 架构与演进边界
 
-## 当前 (v1)
+## 1. 产品目标
 
-```
-ESP32-C3 ──WebSocket──→ ws_server.py (nohup, nohup.out)
-                            │
-                  /tmp/ws_cmd.json (文件传命令)
-                  /tmp/esp32_audio_*.raw
-```
+Desktoppy 不是单独的录音设备，而是一个桌宠形态的 Agent 终端：
 
-**痛点：** 进程无声挂掉、日志缓冲丢失、命令靠文件传、无健康检查。
-
----
-
-## v2 — 稳定性治理（当前目标）
-
-```
-ESP32-C3 ──WebSocket──→ despod (systemd 托管)
-                             │
-                   REST API (POST /cmd/ota 等)
-                   journald (实时日志，不缓冲)
-                   │
-                   └── OTA 固件: ESP32 WiFiClientSecure → GitHub CDN 直连
+```text
+用户说话
+  → 桌宠本地收音
+  → ECS 转写并驱动 Agent / Chatbox
+  → Agent 完成对话或任务
+  → 结果、状态或通知回到桌宠屏幕
 ```
 
-**改动：**
-- systemd unit：自动重启、journald 日志
-- aiohttp：REST API 替代 `/tmp/ws_cmd.json`
-- 单文件 ~300 行
+后续增加扬声器后，输出可以从屏幕扩展为 TTS。功能闭环验证完成后，再进入外壳、电源、PCB 和售卖形态设计。
 
-**收益：** 不再无声挂掉、命令有返回值、日志可追溯。
+## 2. 当前验证架构（M0）
 
----
+```text
+ESP32-C3
+  ├─ GPIO1 按键
+  ├─ INMP441 / I2S（仅录音时启动）
+  ├─ SPIFFS 临时录音（松手后上传）
+  ├─ SSD1315 OLED
+  └─ WebSocket
+        │
+        ▼
+ECS despod.service :8765
+  ├─ 接收 G.711 mu-law 并解码为 16-bit PCM
+  ├─ 下发 display / mic_test / ota
+  └─ systemd 自动重启 + journald
 
-## v3 — 多设备 + MQTT（需要时触发）
-
-```
-ESP32 #1 ──┐
-ESP32 #2 ──┼──MQTT──→ Mosquitto Broker ──→ despod ──→ STT/LLM/TTS
-ESP32 #3 ──┘               │
-                      pub/sub 解耦
-                      多服务可独立订阅
-```
-
-**触发条件：**
-- 2 台以上 ESP32 同时在线
-- 需要 QoS 保证消息不丢
-- 多个服务（日志/监控/STT）需要各自订阅同一路音频
-
----
-
-## v4 — 全双工语音（需要换芯片）
-
-```
-ESP32-S3 ──MQTT──→ Broker ──→ STT → LLM → TTS ──→ Broker ──→ ESP32-S3
-  双 I2S                                          MP3 音频流
-  同时录音+播放
+ECS despod-firmware.service :23717
+  └─ 提供 firmware.bin
+        │
+        ▼
+ESP32 OTA 双分区 + 延迟确认 + 回滚
 ```
 
-**触发条件：**
-- 需要 ESP32 喇叭播放 TTS 回复
-- 需要"对话感"而非"录音→等待→显示文字"
+### 已实现
 
-**硬件变更：** ESP32-C3 → ESP32-S3（双 I2S 外设）
+- Wi-Fi 配网与自动重连；配网热点不再自动超时退出。
+- 本地 mu-law 录音、松手后 WebSocket 上传、ECS PCM 解码、OLED 文字回显。
+- I2S 按需启停、30 秒录音上限、低频 OLED 音量刷新。
+- HTTP/HTTPS OTA、双分区、下载进度和 systemd 固件服务。
+- 新固件连续在线 60 秒后才标记有效。
 
----
+### 尚未实现
 
-## 技术选型决策记录
+- STT、Agent/Chatbox 调用、任务状态模型和结果摘要。
+- 设备身份、鉴权、多设备稳定寻址。
+- 音频文件进入 Agent 的正式队列与回调协议。
+- 扬声器、TTS 与全双工音频。
 
-| 决策点 | 选择 | 为什么 |
-|--------|------|--------|
-| 协议 | WebSocket (v2) → MQTT (v3+) | 单设备用 WS 简单，多设备切 MQTT 才有收益 |
-| 框架 | aiohttp | 比 FastAPI 轻（单包），WS 一等公民，迁移成本低 |
-| 部署 | systemd | 自动重启 + journald，ECS 原生支持 |
-| Broker | Mosquitto (v3+) | 比 EMQX 轻 100 倍，单机够用 |
-| 芯片 | C3 (v2) → S3 (v4) | C3 单 I2S 够录，S3 双 I2S 才能录+放 |
+## 3. 下一阶段（M1）：Agent 消息闭环
 
----
+建议先保持 WebSocket，不急于引入 MQTT。单设备闭环的最小服务链路为：
 
-## 不做的事
+```text
+本地录音完成 → mic_start(codec=mulaw) / audio / mic_stop
+  → 生成 recording_id
+  → STT
+  → Agent job
+  → progress / result / error
+  → OLED 展示
+```
 
-- ❌ 不用 FastAPI：加 uvicorn/starlette/pydantic 三个依赖，对单设备场景过重
-- ❌ 不用 Railway/Serverless：ECS 已付费，迁移无收益
-- ❌ 不现在上 MQTT：一台设备用 pub/sub 是杀鸡用牛刀
-- ❌ 不换芯片：C3 录音够用，等需要喇叭播放时再换 S3
+M1 必须先定义：
+
+- 一次录音对应一个 `recording_id` 和一个 Agent `job_id`。
+- Agent 状态至少包含 `received / transcribing / working / done / failed`。
+- OLED 只展示短状态和最终摘要；长内容保留在 ECS/Chatbox。
+- 网络中断后允许查询最后一个任务状态，不能依赖一次性推送。
+
+## 4. 后续阶段
+
+### M2：声音输出
+
+增加扬声器和 TTS 前先确认硬件是否需要换为 ESP32-S3。目标是播放结果提示和短回复，不在当前 C3 原型上强行实现全双工。
+
+### M3：商品化
+
+- 定制 PCB 与可靠按键，避免使用启动绑带脚。
+- 3D 打印外壳、散热、麦克风声学腔体和扬声器位置。
+- USB-C 供电、电池保护和充电安全验证。
+- 设备唯一身份、配网安全、TLS、固件签名和 OTA 灰度/回滚。
+- 量产烧录、出厂测试、售后诊断和版本追踪。
+
+## 5. 当前明确不做
+
+- 不为单台验证设备提前引入 MQTT/Broker。
+- 不在 STT/Agent 闭环完成前投入完整工业设计。
+- 不把纯 HTTP、无设备鉴权的验证链路直接作为销售版本。

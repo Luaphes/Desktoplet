@@ -9,5 +9,7 @@ try:
         ver = f.read().strip()
 except Exception:
     ver = "dev"
+if ver and not ver.startswith("v"):
+    ver = f"v{ver}"
 env.Append(BUILD_FLAGS=[f'-DFIRMWARE_VERSION=\'"{ver}"\''])
-print(f"[version] FIRMWARE_VERSION set to v{ver}")
+print(f"[version] FIRMWARE_VERSION set to {ver}")

@@ -21,6 +21,23 @@ _cmd_queue = []
 _default_display_msg = ""
 _waiting_loop = False
 
+
+def _mulaw_to_pcm16(data):
+    """Decode G.711 mu-law bytes to little-endian signed 16-bit PCM."""
+    out = bytearray(len(data) * 2)
+    for i, encoded in enumerate(data):
+        value = (~encoded) & 0xFF
+        sign = value & 0x80
+        exponent = (value >> 4) & 0x07
+        mantissa = value & 0x0F
+        sample = (((mantissa << 3) + 0x84) << exponent) - 0x84
+        if sign:
+            sample = -sample
+        sample &= 0xFFFF
+        out[2 * i] = sample & 0xFF
+        out[2 * i + 1] = sample >> 8
+    return out
+
 async def _safe_send(msg, target=None):
     """发送消息到指定或全部 ESP32。断连则入队。"""
     global ESP32s, _cmd_queue
@@ -132,14 +149,20 @@ async def handler(websocket):
         else:
             remaining.append(item)
     _cmd_queue = remaining
-    # Unique filename for this session's audio
-    audio_file = f"/tmp/esp32_audio_{cid}_{int(time.time())}.raw"
+    audio_file = None
+    audio = None
+    audio_codec = "pcm16"
+    recording_number = 0
     try:
         async for message in websocket:
             if isinstance(message, bytes):
-                # Binary = I2S audio stream
-                with open(audio_file, "ab") as f:
-                    f.write(message)
+                if not audio:
+                    print(f"[AUDIO] ESP32 {cid} ignored {len(message)} bytes without mic_start")
+                    continue
+                if audio_codec == "mulaw":
+                    audio.write(_mulaw_to_pcm16(message))
+                else:
+                    audio.write(message)
             else:
                 data = json.loads(message)
                 print(f"[ESP32:{cid}] {json.dumps(data, ensure_ascii=False)}")
@@ -150,13 +173,26 @@ async def handler(websocket):
                         _last_btn_time = now
                         await _restore_display()
                 elif data.get("type") == "mic_start":
-                    print(f"[AUDIO] ESP32 {cid} streaming to {audio_file}")
+                    if audio:
+                        audio.close()
+                    recording_number += 1
+                    audio_codec = data.get("codec", "pcm16")
+                    audio_file = (f"/tmp/esp32_audio_{cid}_{int(time.time())}_"
+                                  f"{recording_number}.raw")
+                    audio = open(audio_file, "ab", buffering=0)
+                    print(f"[AUDIO] ESP32 {cid} streaming {audio_codec} to {audio_file}")
                 elif data.get("type") == "mic_stop":
-                    size = os.path.getsize(audio_file) if os.path.exists(audio_file) else 0
+                    if audio:
+                        audio.close()
+                        audio = None
+                    size = (os.path.getsize(audio_file)
+                            if audio_file and os.path.exists(audio_file) else 0)
                     print(f"[AUDIO] ESP32 {cid} stopped, {size} bytes saved to {audio_file}")
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
+        if audio:
+            audio.close()
         ESP32s.pop(cid, None)
         print(f"[-] ESP32 {cid} disconnected")
 
@@ -180,7 +216,6 @@ async def stdin_forward():
             await _update_display(line)
             if line.startswith("ota"):
                 port = OTA_PORT if ' ' not in line else int(line.split()[1])
-                subprocess.Popen(["python3", "-m", "http.server", str(port)])
                 await _safe_send(json.dumps({"type": "ota", "url": f"http://118.31.46.156:{port}/firmware.bin"}))
 
 def get_local_ip():

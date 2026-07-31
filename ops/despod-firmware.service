@@ -1,0 +1,16 @@
+[Unit]
+Description=Desktoppy OTA Firmware Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/esp32-firmware
+ExecStart=/usr/bin/python3 -m http.server 23717 --bind 0.0.0.0
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

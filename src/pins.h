@@ -2,7 +2,7 @@
 #define PINS_H
 
 // 引脚定义（按接线图，不改固件就不动这里）
-#define BTN_PIN    0
+#define BTN_PIN    1
 #define MIC_WS     2
 #define MIC_SCK    3
 #define MIC_SD     4
