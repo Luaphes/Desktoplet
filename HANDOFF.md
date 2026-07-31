@@ -1,12 +1,22 @@
-# Handoff — v98 稳定性与 OTA 闭环
+# Handoff — v0.0.103 M0 稳定基线与 ECS 接管
 
 ## 当前状态
 
 - 硬件：ESP32-C3 SuperMini，设备 MAC `14:63:93:90:CF:94`
 - 固件：v0.0.103（M0 本地录音/后台上传链路已通过）
-- 本地 IP：`192.168.31.116`（由 DHCP 分配，后续可能变化）
+- Git 基线：`main@0dc42b2`，发布标签 `v0.0.103`
 - ECS WebSocket：`118.31.46.156:8765`，由 `despod.service` 托管
 - ECS OTA：`http://118.31.46.156:23717/firmware.bin`，由 `despod-firmware.service` 托管
+
+## ECS 接管状态（2026-08-01）
+
+- 开发工作区：`/root/Desktoppy`，应从 GitHub `main` 继续开发。
+- 线上运行目录：`/root/esp32-firmware`。该目录承载 systemd 服务和发布固件，不作为日常开发工作区。
+- 已发布固件：`/root/esp32-firmware/releases/v0.0.103/firmware.bin`。
+- OTA 固件 SHA-256：`c9087229238a1cfe8684bc15bd77c4f39fe2dc75e1baf9f34d4e02f3d5be3dbf`。
+- 回滚副本：`/root/esp32-firmware/firmware.previous.bin`。
+- 自动 OTA 指令已写入 `/tmp/ws_cmd.json`。设备当前未供电/未连接；再次上线后服务端会自动下发，只有 ECS 收到同一 MAC 上报 `version=v0.0.103` 才算升级完成。
+- ECS 当前未安装 PlatformIO。下一位 Agent 若要完全在 ECS 开发和发布，应先建立可重复的构建环境，再继续修改固件；不要重新依赖本地串口刷写。
 
 ## 本轮根因与修复
 
@@ -60,4 +70,10 @@
 
 ## 下一阶段
 
-M1 的最小闭环是：`mic_start / PCM / mic_stop` → STT → Agent job → `progress / result / error` → OLED。当前服务端仍只保存原始 PCM，尚未接入 STT、Agent、Chatbox 或 TTS。
+M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_id` → Agent job → `progress / result / error` → OLED。当前服务端仍只保存原始 PCM，尚未接入 STT、Agent、Chatbox 或 TTS。
+
+下一位 ECS Agent 的首要验收顺序：
+
+1. 等设备上线，确认日志依次出现 OTA 指令、`GET /firmware.bin`、断线重启和 `version=v0.0.103`。
+2. 上线后持续观察至少 60 秒，并确认 `despod.service`、`despod-firmware.service` 仍为 `active`。
+3. 再开始 M1 协议设计；不要破坏 v0.0.103 已验证的 store-and-forward、GPIO1、I2S 完整卸载和 OTA 回滚路径。
