@@ -207,8 +207,8 @@ void setup() {
     drawVersionCorner();
     u8g2.sendBuffer();
 
-    // I2S init — DISABLED for crash diagnosis
-    // initI2S();
+    // I2S init — RE-ENABLED for Build B
+    initI2S();
     pinMode(BTN_PIN, INPUT_PULLUP);
 
     // WebSocket
