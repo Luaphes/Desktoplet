@@ -350,15 +350,21 @@ void loop() {
         }
     }
 
-    // DIAG: OLED heartbeat — blink dot every 1s at top-right
+    // DIAG: OLED heartbeat — blink version number every 1s
     static unsigned long lastBeat = 0;
+    static bool showVer = true;
     if (millis() - lastBeat > 1000) {
-        static bool dot = false;
-        dot = !dot;
-        if (dot) {
-            u8g2.setFont(u8g2_font_ncenB08_tr);
-            u8g2.drawStr(118, 8, ".");
-        }
+        showVer = !showVer;
+        // Redraw idle screen: WiFi OK + IP + (maybe) version
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        int tw = u8g2.getStrWidth("WiFi OK");
+        u8g2.drawStr((128 - tw) / 2, 14, "WiFi OK");
+        String ip = WiFi.localIP().toString();
+        int iw = u8g2.getStrWidth(ip.c_str());
+        u8g2.drawStr((128 - iw) / 2, 34, ip.c_str());
+        if (showVer) drawVersionCorner();
+        u8g2.sendBuffer();
         lastBeat = millis();
     }
 }
