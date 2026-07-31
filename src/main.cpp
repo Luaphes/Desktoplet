@@ -7,6 +7,7 @@
 #include <esp_ota_ops.h>
 #include <U8g2lib.h>
 #include <driver/i2s.h>
+#include <esp_task_wdt.h>
 #include "hermes_logo.h"
 
 // ---- OLED (SSD1315 via U8g2 HW I2C) ----
@@ -206,8 +207,8 @@ void setup() {
     drawVersionCorner();
     u8g2.sendBuffer();
 
-    // I2S init
-    initI2S();
+    // I2S init — DISABLED for crash diagnosis
+    // initI2S();
     pinMode(BTN_PIN, INPUT_PULLUP);
 
     // WebSocket
@@ -220,6 +221,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();  // DIAG: feed task watchdog
     ws.loop();
     
     // ---- Deferred OTA (non-blocking flag, actual download here) ----
@@ -346,5 +348,12 @@ void loop() {
             drawVersionCorner();
             u8g2.sendBuffer();
         }
+    }
+
+    // DIAG: heartbeat every 1s
+    static unsigned long lastBeat = 0;
+    if (millis() - lastBeat > 1000) {
+        Serial.println(".");
+        lastBeat = millis();
     }
 }
