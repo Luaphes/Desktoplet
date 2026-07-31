@@ -1,0 +1,1 @@
+{"ts": "2026-07-27T17:51:46.411493", "event": "session_end", "summary": "ESP32 Desktoppy Arduino migration done. v86 base: OLED/U8g2, WiFi/WiFiManager, WS/links2004, OTA/httpUpdate, I2S/old API. Button-triggered audio streaming via WS binary.", "handoff": "HANDOFF.md", "next": "STT+Agent+TTS"}

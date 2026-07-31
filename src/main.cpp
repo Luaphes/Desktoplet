@@ -132,7 +132,7 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
 }
 
 void setup() {
-    Serial.begin(115200);
+    USBSerial.begin(115200);
 
     // Boot animation — Hermes logo (64x64) + Desktoppy label
     u8g2.begin();
@@ -353,7 +353,7 @@ void loop() {
     // DIAG: heartbeat every 1s
     static unsigned long lastBeat = 0;
     if (millis() - lastBeat > 1000) {
-        Serial.println(".");
+        USBSerial.println(".");
         lastBeat = millis();
     }
 }
