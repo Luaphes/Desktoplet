@@ -132,7 +132,7 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
 }
 
 void setup() {
-    Serial.begin(115200);
+    // DIAG: no Serial on C3 — use OLED heartbeat instead
 
     // Boot animation — Hermes logo (64x64) + Desktoppy label
     u8g2.begin();
@@ -350,10 +350,15 @@ void loop() {
         }
     }
 
-    // DIAG: heartbeat every 1s
+    // DIAG: OLED heartbeat — blink dot every 1s at top-right
     static unsigned long lastBeat = 0;
     if (millis() - lastBeat > 1000) {
-        Serial.println(".");
+        static bool dot = false;
+        dot = !dot;
+        if (dot) {
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            u8g2.drawStr(118, 8, ".");
+        }
         lastBeat = millis();
     }
 }
