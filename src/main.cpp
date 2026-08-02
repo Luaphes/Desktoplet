@@ -284,8 +284,24 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
             jsonStringValue(msg, "text", text);
             u8g2.clearBuffer();
             u8g2.setFont(u8g2_font_ncenB08_tr);
-            int tw = u8g2.getStrWidth(text.c_str());
-            u8g2.drawStr((128 - tw) / 2, 32, text.c_str());
+
+            // Multi-line: split by \\n, draw up to 4 lines
+            int y = 14;
+            int start = 0;
+            int lines = 0;
+            while (start < text.length() && lines < 4) {
+                int nl = text.indexOf("\n", start);
+                String line = (nl >= 0) ? text.substring(start, nl) : text.substring(start);
+                line.trim();
+                if (line.length() > 0) {
+                    u8g2.drawStr(0, y, line.c_str());
+                    y += 12;
+                    lines++;
+                }
+                if (nl < 0) break;
+                start = nl + 1;  // skip \n
+            }
+
             drawVersionCorner();
             u8g2.sendBuffer();
         } else if (msg.indexOf("\"mic_test\"") >= 0) {

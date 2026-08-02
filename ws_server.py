@@ -10,6 +10,23 @@ import json
 import os
 import sys
 import time
+import struct
+import httpx
+
+# ---- M1: STT + LLM API keys (from Hermes config) ----
+import yaml
+with open(os.path.expanduser("~/.hermes/config.yaml")) as _f:
+    _cfg = yaml.safe_load(_f)
+_SF_KEY = ""
+_AGNES_KEY = ""
+_AGNES_URL = ""
+for _p in _cfg.get("custom_providers", []):
+    _n = _p.get("name", "")
+    if "silicon" in _n.lower():
+        _SF_KEY = _p.get("api_key", "")
+    elif "agnes" in _n.lower():
+        _AGNES_KEY = _p.get("api_key", "")
+        _AGNES_URL = _p.get("base_url", "").rstrip("/")
 
 ESP32s = {}
 _next_id = 0
@@ -188,6 +205,13 @@ async def handler(websocket):
                     size = (os.path.getsize(audio_file)
                             if audio_file and os.path.exists(audio_file) else 0)
                     print(f"[AUDIO] ESP32 {cid} stopped, {size} bytes saved to {audio_file}")
+                    # M1: kick off STT → LLM pipeline
+                    if size > 0 and audio_file:
+                        rid = data.get("id", f"rec_{int(time.time())}_{recording_number}")
+                        await _safe_send(json.dumps({
+                            "type": "display", "text": "处理中..."
+                        }), cid)
+                        asyncio.create_task(_process_recording(rid, audio_file, cid))
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
@@ -216,7 +240,7 @@ async def stdin_forward():
             await _update_display(line)
             if line.startswith("ota"):
                 port = OTA_PORT if ' ' not in line else int(line.split()[1])
-                await _safe_send(json.dumps({"type": "ota", "url": f"http://118.31.46.156:{port}/firmware.bin"}))
+                await _safe_send(json.dumps({"type": "ota", "url": f"http://{get_public_ip()}:{port}/firmware.bin"}))
 
 def get_local_ip():
     import socket
@@ -228,6 +252,91 @@ def get_local_ip():
         return "127.0.0.1"
     finally:
         s.close()
+
+def get_public_ip():
+    import urllib.request
+    try:
+        return urllib.request.urlopen("http://ifconfig.me", timeout=2).read().decode().strip()
+    except:
+        return "118.31.46.156"  # fallback to known static IP
+
+# ---- M1: STT + LLM processing ----
+
+def _pcm_to_wav(pcm_data: bytes, sample_rate=16000) -> bytes:
+    """Wrap 16-bit mono PCM in a minimal WAV container."""
+    import io, wave
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes(pcm_data)
+    return buf.getvalue()
+
+def _stt_transcribe(pcm_path: str) -> str:
+    """Send PCM to SenseVoiceSmall via SiliconFlow, return text."""
+    with open(pcm_path, 'rb') as f:
+        pcm = f.read()
+    wav = _pcm_to_wav(pcm)
+    r = httpx.post(
+        "https://api.siliconflow.cn/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {_SF_KEY}"},
+        files={"file": ("audio.wav", wav, "audio/wav")},
+        data={"model": "FunAudioLLM/SenseVoiceSmall", "response_format": "json"},
+        timeout=30)
+    r.raise_for_status()
+    return r.json().get("text", "").strip()
+
+AGNES_SYSTEM = (
+    "你是 ESP32 桌面助手。用户说的话已通过语音识别转成文字。\\n"
+    "回复要求：50字以内，用\\n分最多4行，中文口语化。"
+    "不理解时说「没太听清，再说一次？」"
+)
+
+def _agnes_chat(user_text: str) -> str:
+    """Send text to Agnes, return reply."""
+    r = httpx.post(
+        f"{_AGNES_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {_AGNES_KEY}", "Content-Type": "application/json"},
+        json={
+            "model": "agnes-2.5-flash",
+            "messages": [
+                {"role": "system", "content": AGNES_SYSTEM},
+                {"role": "user", "content": user_text}
+            ],
+            "max_tokens": 100,
+            "temperature": 0.7
+        },
+        timeout=15)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"].strip()
+
+async def _process_recording(recording_id: str, pcm_path: str, target_cid: str):
+    """STT → Agnes LLM → display. Runs as background task."""
+    loop = asyncio.get_running_loop()
+    try:
+        # 1. STT
+        text = await loop.run_in_executor(None, _stt_transcribe, pcm_path)
+        if not text:
+            await _safe_send(json.dumps({
+                "type": "display", "text": "没听清..."
+            }), target_cid)
+            return
+        print(f"[M1:{target_cid}] STT: {text}")
+
+        # 2. LLM
+        reply = await loop.run_in_executor(None, _agnes_chat, text)
+        print(f"[M1:{target_cid}] Agnes: {reply}")
+
+        # 3. Display
+        display_text = f"你说：{text}\\n\\n{reply}"
+        await _safe_send(json.dumps({"type": "display", "text": display_text}), target_cid)
+
+    except Exception as e:
+        print(f"[M1:{target_cid}] ERROR: {e}")
+        await _safe_send(json.dumps({
+            "type": "display", "text": f"出错了: {str(e)[:40]}"
+        }), target_cid)
 
 async def main():
     print("WebSocket 服务端启动，等待 ESP32 连接...")
