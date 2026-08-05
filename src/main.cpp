@@ -283,7 +283,8 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
             String text = "";
             jsonStringValue(msg, "text", text);
             u8g2.clearBuffer();
-            u8g2.setFont(u8g2_font_ncenB08_tr);
+            // 中文字体：wqy12 覆盖常用汉字（需 enableUTF8Print，见 setup）
+            u8g2.setFont(u8g2_font_wqy12_t_chinese2);
 
             // Multi-line: split by \\n, draw up to 4 lines
             int y = 14;
@@ -332,6 +333,8 @@ void setup() {
     // Boot animation — Hermes logo (64x64) + Desktoppy label
     u8g2.begin();
     u8g2.setFlipMode(0);
+    // display 消息支持中文（wqy12）：必须在绘制前启用 UTF-8 输出
+    u8g2.enableUTF8Print();
     u8g2.clearBuffer();
     u8g2.drawXBM(0, 0, 64, 64, hermes_logo);
     u8g2.setFont(u8g2_font_ncenB10_tr);
