@@ -84,3 +84,10 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 1. 等设备上线，确认日志依次出现 OTA 指令、`GET /firmware.bin`、断线重启和 `version=v0.0.103`。
 2. 上线后持续观察至少 60 秒，并确认 `despod.service`、`despod-firmware.service` 仍为 `active`。
 3. 再开始 M1 协议设计；不要破坏 v0.0.103 已验证的 store-and-forward、GPIO1、I2S 完整卸载和 OTA 回滚路径。
+
+## M1 验证记录（2026-08-06）
+
+- `m1-stt-validation` 已从 `m1-stt-pipeline` 派生；CI 版本归一化、YAML 解析、mu-law/WAV、mock STT→Agnes→OLED 多行消息均通过。
+- 修复了服务端结果中的字面量 `\\n` 缺陷，现会发送真正的换行字符，C3 多行 OLED 逻辑才能生效。
+- 使用 ECS 历史 v103 PCM 样本完成真实 STT→Agnes→OLED 验证：120,706 字节、约 3.77 秒，三段链路均返回成功。
+- 当前线上仍是 v103 M0 和旧版 `despod.service`；本验证分支不部署、不 release、不 OTA。实时按键采集仍需现场回归。
