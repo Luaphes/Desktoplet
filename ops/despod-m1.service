@@ -1,0 +1,19 @@
+[Unit]
+Description=Desktoppy M1 Orchestrator (STT -> Agent -> display)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Desktoppy
+# 单进程 uvicorn；M1 只绑 loopback，不对公网开放
+ExecStart=/root/Desktoppy/.venv/bin/python -m uvicorn m1_service.app:app --host 127.0.0.1 --port 8786
+Restart=on-failure
+RestartSec=3
+EnvironmentFile=/etc/despod-m1.env
+# 基础日志约束；密钥只经 EnvironmentFile 注入，不落盘
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

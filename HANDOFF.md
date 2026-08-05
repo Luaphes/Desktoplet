@@ -102,3 +102,78 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 - 目标是当前 MAC `14:63:93:90:CF:94` 的无 OTA canary：现有 v0.0.103 WebSocket 接收录音，M1 顺序执行 STT → Agent → display → OLED。
 - 本阶段不做 TTS、多 ECS、Railway 迁移和多设备压测；M0 WebSocket、OTA 服务和固件基线保持不变。
 - ECS Agent 开始编码前必须先读完整实现说明；每完成一小段先跑文档规定的测试，再更新本 HANDOFF 的状态和风险。
+
+## M1 后端实现状态（2026-08-06 本轮）
+
+- **代码落地**（均在 `/root/Desktoppy`，分支 `m1-stt-pipeline`）：
+  - `m1_service/`：config（EnvironmentFile 读 key）/ models / store（SQLite jobs 表）/ worker（Queue(maxsize=1)+in-flight 计数、状态机、重启恢复）/ app（healthz + POST/GET jobs）/ providers/stt.py（SiliconFlow SenseVoiceSmall）/ providers/agent.py（Agnes 2.5 Flash）
+  - `ws_server.py` 改造：删除 b8cb47a 内嵌 M1 实验代码（不再直接持有 key），改为 canary 路由——identify 登记 MAC，仅目标 MAC `14:63:93:90:CF:94` 在 mic_stop 后 POST `127.0.0.1:8786/internal/v1/jobs` 并轮询下发 OLED 事件（处理中.../没听清.../你说：…+回复摘要/服务暂不可用，4 行截断）；不打印 transcript
+  - `ops/despod-m1.service`（草案，未安装）+ `ops/despod-m1.env.example`（占位符模板）
+  - `tests/`：test_m1_service.py（11 用例）、test_ws_canary.py（4 用例）、test_m1_sample.py（真实 API，无 key 时 skip）
+- **验收 A（不接板子）结果**：
+  - 单元 + canary 集成 15/15 全绿（健康检查/幂等/409/路径穿越/失败状态/重启恢复/OLED 截断/M1 不可达降级）
+  - 真实 uvicorn 127.0.0.1:8786 验证：healthz 200、POST 202、重复提交 200 同 job、穿越 400
+  - 历史 v103 样本 `/tmp/esp32_audio_2_1785524428_2.raw`（120,706B）真实链路：STT→"1秒2秒3秒。"→Agnes 回复，job done
+- **剩余风险 / 待办**：
+  1. `despod-m1.service` 未安装（systemd 托管留到 Canary 验收阶段）
+  2. ws_server.py 的 WS→canary 完整路径需真实板子回归（验收 B）；本机 8765 被线上占用无法本地端到端
+  3. M1 key 注入依赖 /etc/despod-m1.env（安装服务时创建，chmod 600）
+  4. 代码审查：自查完成（2026-08-06），独立复核 agent 结论待追加
+
+## 独立审查结论（deleg_d8f938f5，2026-08-06）
+
+- 结论：🟡 有条件通过 Canary 验收；独立审查确认全部安全/契约硬约束满足，
+  b8cb47a 内嵌代码彻底清除、测试全绿、无 Redis 等越界组件
+- 审查发现并已修复：
+  1. 【真实 bug】队列满 409 时 job 已写 SQLite 但卡在 received 永不处理
+     （重启才会恢复重试）→ submit 失败时显式置 failed/error_code=queue_full
+  2. 【契约】409 后 ws_server 显示「处理中...」但本次录音实际未被接受
+     → 改为「服务忙，稍后再试」诚实提示
+  3. 【契约】healthz 用查询不存在 job 验证 DB 不诚实 → 改 store.health()
+     显式 SELECT 1，失败返回 503
+  4. 【防御】set_status 无状态合法性校验 → 加 _VALID_STATUSES 检查
+  5. 测试补断言：409 后 DB job 为 failed/queue_full
+- 审查提出但评估不修的：
+  1. CANARY_MAC 硬编码（单设备阶段契约即写死该 MAC）
+  2. venv 绝对路径（文档 §8 允许确认依赖后使用虚拟环境）
+  3. 运行时状态机流转校验（worker 逻辑已保证单向；set_status 已有合法值校验）
+- 独立复核 agent 2（deleg_134bff3f）结论待合并
+
+## 独立复核结论（deleg_134bff3f，2026-08-06）
+
+- 结论：修复 2 项后可进入 Canary；其余 P2 不阻塞
+- 采纳并已修复：
+  1. 幂等重复提交返回 200 → 统一 202（契约字面「成功创建返回 202」），
+     M0 侧本就接受 200/202 无行为差异；测试断言同步
+  2. poll 请求 timeout 2s → 5s（M1 偶发慢响应不误判；submit 保持 2s 快速失败）
+  3. 补 3 个测试：poll 404 降级、poll deadline 超时降级（fake http.server）、
+     处理中 job 幂等（不重复调用）
+- 误报项（代码已正确，复核读取窗口不全）：
+  1. 「空 transcript 未传 transcript=``」——worker.py:113 已传，测试已断言
+  2. 「429 不重试」——循环结构保证 429 进入下一轮 attempt（指数退避）
+  3. 「healthz sentinel key」——此前已改 store.health() SELECT 1（复核基于旧快照）
+- 评估不修：ws_server print 风格（与 M0 全文件一致，不重构）；audio_root
+  默认 /tmp 已与 M0 落盘一致（config docstring 说明）；运行状态机流转校验
+  （set_status 已有合法值校验）
+
+## 最终审查状态（2026-08-06）
+
+- 两轮独立审查 + 自查全部闭环；验收 A 全部通过
+- 当前测试：20 用例（18 pass + 2 skip 需真实 key）；真实样本链路已验证
+- 可进入 Canary 验收（B 阶段）：安装 despod-m1.service + 真实板子回归
+
+## 代码审查结论（自查，2026-08-06）
+
+- **严重（契约/安全）**：无
+- **审查中发现并已修复**：
+  1. Queue(maxsize=1) 只限制排队中任务，实际并发上限为 2 → 增加 in-flight 计数，队列满严格 409（worker.py）
+  2. uvicorn 缺少模块级 app 入口 → 补 `app = create_app()`（app.py）
+  3. recording_id fallback 缺设备标识，多设备同秒录音会撞号 → fallback 加 cid（ws_server.py）
+  4. 幂等检查在路径校验之后，重复提交遇非法路径会 400 而非返回原 job → 幂等提前（app.py，契约「重复提交返回原 job」）
+  5. `resp.json()` 解析异常未捕获会导致后台任务静默失败 → 捕获 ValueError/KeyError 并降级 OLED 提示（ws_server.py）
+  6. providers 函数内 `import asyncio` → 移至模块顶部（风格）
+- **已知边界（记录不修）**：
+  1. Agent 上下文延续未实现：session_id/device_id 已传参，但 Agnes 调用为单轮无状态——契约要求「M1 Orchestrator 不自行发明记忆系统」，会话上下文属 Agent Gateway 职责，本阶段符合契约
+  2. `get_public_ip()` 为 b8cb47a 遗留的 OTA 相关改动，不在 M1 范畴，保留
+  3. 恢复的 job 若在 Agent 阶段崩溃，重启后会重新执行 STT（重复调用一次模型）——契约接受「扫描恢复避免丢任务」，幂等在 recording_id 层保证不重复创建
+- **准入建议**：验收 A 全部通过，可进入 Canary（B 阶段）

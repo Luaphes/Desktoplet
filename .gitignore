@@ -7,5 +7,8 @@ __pycache__/
 .vscode/
 .idea/
 venv/
+.venv/
 *.bin
 firmware.bin
+# M1 本地运行时数据（SQLite 等），不提交
+data/

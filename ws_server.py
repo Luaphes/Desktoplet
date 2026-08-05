@@ -10,23 +10,14 @@ import json
 import os
 import sys
 import time
-import struct
 import httpx
 
-# ---- M1: STT + LLM API keys (from Hermes config) ----
-import yaml
-with open(os.path.expanduser("~/.hermes/config.yaml")) as _f:
-    _cfg = yaml.safe_load(_f)
-_SF_KEY = ""
-_AGNES_KEY = ""
-_AGNES_URL = ""
-for _p in _cfg.get("custom_providers", []):
-    _n = _p.get("name", "")
-    if "silicon" in _n.lower():
-        _SF_KEY = _p.get("api_key", "")
-    elif "agnes" in _n.lower():
-        _AGNES_KEY = _p.get("api_key", "")
-        _AGNES_URL = _p.get("base_url", "").rstrip("/")
+# ---- M1 canary：只对目标 MAC 路由到 M1 Orchestrator (127.0.0.1:8786) ----
+# M1 是独立 FastAPI 服务；本文件不直接调用 STT/Agent API。
+CANARY_MAC = "14:63:93:90:CF:94"
+M1_BASE = "http://127.0.0.1:8786"
+M1_POLL_INTERVAL = 0.5
+M1_POLL_TIMEOUT = 60.0
 
 ESP32s = {}
 _next_id = 0
@@ -37,6 +28,7 @@ _is_restored = False
 _cmd_queue = []
 _default_display_msg = ""
 _waiting_loop = False
+_device_macs = {}  # cid -> MAC（identify 时登记）
 
 
 def _mulaw_to_pcm16(data):
@@ -183,7 +175,11 @@ async def handler(websocket):
             else:
                 data = json.loads(message)
                 print(f"[ESP32:{cid}] {json.dumps(data, ensure_ascii=False)}")
-                if data.get("type") == "btn_click":
+                if data.get("type") == "identify":
+                    _device_macs[cid] = str(data.get("mac", "")).upper()
+                    print(f"[IDENTIFY] ESP32 {cid} mac={_device_macs[cid]} "
+                          f"version={data.get('version', '?')}")
+                elif data.get("type") == "btn_click":
                     global _last_btn_time
                     now = time.time()
                     if now - _last_btn_time > 3:
@@ -205,19 +201,20 @@ async def handler(websocket):
                     size = (os.path.getsize(audio_file)
                             if audio_file and os.path.exists(audio_file) else 0)
                     print(f"[AUDIO] ESP32 {cid} stopped, {size} bytes saved to {audio_file}")
-                    # M1: kick off STT → LLM pipeline
-                    if size > 0 and audio_file:
-                        rid = data.get("id", f"rec_{int(time.time())}_{recording_number}")
-                        await _safe_send(json.dumps({
-                            "type": "display", "text": "处理中..."
-                        }), cid)
-                        asyncio.create_task(_process_recording(rid, audio_file, cid))
+                    # M1 canary：目标 MAC 录音结束后路由到 M1 Orchestrator。
+                    # 其它设备/未识别 MAC 保持 M0 原行为。
+                    mac = _device_macs.get(cid, "")
+                    if size > 0 and audio_file and mac == CANARY_MAC:
+                        # 固件 mic_stop 不带 id；fallback 含 cid 防止多设备撞号
+                        rid = data.get("id", f"rec_{cid}_{int(time.time())}_{recording_number}")
+                        asyncio.create_task(_submit_m1_job(rid, audio_file, cid, mac))
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
         if audio:
             audio.close()
         ESP32s.pop(cid, None)
+        _device_macs.pop(cid, None)
         print(f"[-] ESP32 {cid} disconnected")
 
 async def stdin_forward():
@@ -260,83 +257,120 @@ def get_public_ip():
     except:
         return "118.31.46.156"  # fallback to known static IP
 
-# ---- M1: STT + LLM processing ----
+# ---- M1 canary：提交任务 + 轮询状态 + OLED 事件 ----
 
-def _pcm_to_wav(pcm_data: bytes, sample_rate=16000) -> bytes:
-    """Wrap 16-bit mono PCM in a minimal WAV container."""
-    import io, wave
-    buf = io.BytesIO()
-    with wave.open(buf, 'wb') as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(sample_rate)
-        w.writeframes(pcm_data)
-    return buf.getvalue()
+def _fit_oled(text: str, max_lines: int = 4, max_chars: int = 12) -> str:
+    """OLED 128x64 / wqy12 中文约 10-12 字一行、最多约 4-5 行。
+    服务端先截断，避免大段文本推给板子。"""
+    lines = text.split("\n")
+    out = []
+    for ln in lines:
+        if len(out) >= max_lines:
+            break
+        if len(ln) > max_chars:
+            ln = ln[: max_chars - 1] + "…"
+        out.append(ln)
+    return "\n".join(out)
 
-def _stt_transcribe(pcm_path: str) -> str:
-    """Send PCM to SenseVoiceSmall via SiliconFlow, return text."""
-    with open(pcm_path, 'rb') as f:
-        pcm = f.read()
-    wav = _pcm_to_wav(pcm)
-    r = httpx.post(
-        "https://api.siliconflow.cn/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {_SF_KEY}"},
-        files={"file": ("audio.wav", wav, "audio/wav")},
-        data={"model": "FunAudioLLM/SenseVoiceSmall", "response_format": "json"},
-        timeout=30)
-    r.raise_for_status()
-    return r.json().get("text", "").strip()
 
-AGNES_SYSTEM = (
-    "你是 ESP32 桌面助手。用户说的话已通过语音识别转成文字。\n"
-    "回复要求：50字以内，用\n分最多4行，中文口语化。"
-    "不理解时说「没太听清，再说一次？」"
-)
-
-def _agnes_chat(user_text: str) -> str:
-    """Send text to Agnes, return reply."""
-    r = httpx.post(
-        f"{_AGNES_URL}/chat/completions",
-        headers={"Authorization": f"Bearer {_AGNES_KEY}", "Content-Type": "application/json"},
-        json={
-            "model": "agnes-2.5-flash",
-            "messages": [
-                {"role": "system", "content": AGNES_SYSTEM},
-                {"role": "user", "content": user_text}
-            ],
-            "max_tokens": 100,
-            "temperature": 0.7
-        },
-        timeout=15)
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
-
-async def _process_recording(recording_id: str, pcm_path: str, target_cid: str):
-    """STT → Agnes LLM → display. Runs as background task."""
-    loop = asyncio.get_running_loop()
+async def _submit_m1_job(recording_id: str, audio_path: str,
+                         cid: str, mac: str):
+    """把录音提交给 M1 Orchestrator，然后轮询直到终态并下发 OLED。"""
     try:
-        # 1. STT
-        text = await loop.run_in_executor(None, _stt_transcribe, pcm_path)
-        if not text:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.post(f"{M1_BASE}/internal/v1/jobs", json={
+                "device_id": mac,
+                "session_id": f"device-{mac.lower().replace(':', '-')}",
+                "recording_id": recording_id,
+                "audio_path": audio_path,
+                "codec": "pcm16",  # M0 落盘前已把 mu-law 解码为 16-bit PCM
+                "sample_rate": 16000,
+                "channels": 1,
+            })
+        # submit 用 2s（快速失败告知用户）；轮询用 5s（M1 偶发慢响应不误判）
+        if resp.status_code == 409:
+            # M1 单 in-flight 已满，本次录音未被接受：诚实告知，不假装处理中。
             await _safe_send(json.dumps({
-                "type": "display", "text": "没听清..."
-            }), target_cid)
+                "type": "display", "text": "服务忙，稍后再试"
+            }), cid)
             return
-        print(f"[M1:{target_cid}] STT: {text}")
-
-        # 2. LLM
-        reply = await loop.run_in_executor(None, _agnes_chat, text)
-        print(f"[M1:{target_cid}] Agnes: {reply}")
-
-        # 3. Display
-        display_text = f"你说：{text}\n\n{reply}"
-        await _safe_send(json.dumps({"type": "display", "text": display_text}), target_cid)
-
-    except Exception as e:
-        print(f"[M1:{target_cid}] ERROR: {e}")
+        if resp.status_code not in (200, 202):
+            print(f"[M1:{cid}] submit failed HTTP {resp.status_code}")
+            await _safe_send(json.dumps({
+                "type": "display", "text": "服务暂不可用"
+            }), cid)
+            return
+        try:
+            job_id = resp.json()["job_id"]
+        except (ValueError, KeyError):
+            print(f"[M1:{cid}] submit bad response")
+            await _safe_send(json.dumps({
+                "type": "display", "text": "服务暂不可用"
+            }), cid)
+            return
+        print(f"[M1:{cid}] job {job_id} submitted (rec={recording_id})")
         await _safe_send(json.dumps({
-            "type": "display", "text": f"出错了: {str(e)[:40]}"
-        }), target_cid)
+            "type": "display", "text": "处理中..."
+        }), cid)
+        await _poll_m1_job(job_id, cid)
+    except httpx.HTTPError:
+        print(f"[M1:{cid}] M1 unreachable")
+        await _safe_send(json.dumps({
+            "type": "display", "text": "服务暂不可用"
+        }), cid)
+
+
+async def _poll_m1_job(job_id: str, cid: str):
+    """轮询 job 状态；终态时按结果下发 OLED 事件。不打印 transcript。"""
+    deadline = time.time() + M1_POLL_TIMEOUT
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            while time.time() < deadline:
+                resp = await client.get(f"{M1_BASE}/internal/v1/jobs/{job_id}")
+                if resp.status_code == 404:
+                    print(f"[M1:{cid}] job {job_id} gone")
+                    await _safe_send(json.dumps({
+                        "type": "display", "text": "服务暂不可用"
+                    }), cid)
+                    return
+                if resp.status_code != 200:
+                    print(f"[M1:{cid}] poll HTTP {resp.status_code}")
+                    await asyncio.sleep(M1_POLL_INTERVAL)
+                    continue
+                job = resp.json()
+                status = job.get("status")
+                if status in ("received", "transcribing", "working", "displaying"):
+                    await asyncio.sleep(M1_POLL_INTERVAL)
+                    continue
+                if status == "done":
+                    transcript = (job.get("transcript") or "").strip()
+                    reply = (job.get("reply") or "").strip()
+                    if not transcript:
+                        await _safe_send(json.dumps({
+                            "type": "display", "text": "没听清..."
+                        }), cid)
+                    else:
+                        text = _fit_oled(f"你说：{transcript}\n\n{reply}")
+                        await _safe_send(json.dumps({
+                            "type": "display", "text": text
+                        }), cid)
+                    print(f"[M1:{cid}] job {job_id} done")
+                else:  # failed
+                    print(f"[M1:{cid}] job {job_id} failed "
+                          f"error_code={job.get('error_code')}")
+                    await _safe_send(json.dumps({
+                        "type": "display", "text": "服务暂不可用"
+                    }), cid)
+                return
+        print(f"[M1:{cid}] job {job_id} poll timeout")
+        await _safe_send(json.dumps({
+            "type": "display", "text": "服务暂不可用"
+        }), cid)
+    except httpx.HTTPError:
+        print(f"[M1:{cid}] M1 unreachable while polling {job_id}")
+        await _safe_send(json.dumps({
+            "type": "display", "text": "服务暂不可用"
+        }), cid)
 
 async def main():
     print("WebSocket 服务端启动，等待 ESP32 连接...")
