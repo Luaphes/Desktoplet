@@ -21,7 +21,7 @@
 ## M0 OTA 基线（冻结）
 
 - `v0.0.103` 是当前线上 M0 稳定基线；除 OTA 回滚或安全修复外，不再从 M1 分支向板子发布固件。
-- 只有 `main` 的版本化发布才允许进入 OTA 服务；`m1-stt-validation` 只做 artifact 和验证，不自动 release、不自动 OTA。
+- 只有 `main` 的版本化发布才允许进入 OTA 服务；`m1-stt-pipeline` 只做 artifact 和验证，不自动 release、不自动 OTA；不会进入 OTA 发布路径。
 - OTA 完备性已按“远程下载、双分区、失败重试、60 秒在线确认、ECS 版本上报”验收；后续 M1 验证不能破坏这条路径。
 - 当前开发接力分支：`m1-stt-pipeline`；M1 验证提交已归入该功能分支，尚未进入 `main`。
 
@@ -90,4 +90,4 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 - `m1-stt-pipeline` 作为唯一 M1 功能分支；CI 版本归一化、YAML 解析、mu-law/WAV、mock STT→Agnes→OLED 多行消息均通过。
 - 修复了服务端结果中的字面量 `\\n` 缺陷，现会发送真正的换行字符，C3 多行 OLED 逻辑才能生效。
 - 使用 ECS 历史 v103 PCM 样本完成真实 STT→Agnes→OLED 验证：120,706 字节、约 3.77 秒，三段链路均返回成功。
-- 当前线上仍是 v103 M0 和旧版 `despod.service`；本验证分支不部署、不 release、不 OTA。实时按键采集仍需现场回归。
+- 当前线上仍是 v103 M0 和旧版 `despod.service`；该功能分支当前不部署、不 release、不 OTA。实时按键采集仍需现场回归。
