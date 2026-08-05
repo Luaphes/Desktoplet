@@ -91,3 +91,14 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 - 修复了服务端结果中的字面量 `\\n` 缺陷，现会发送真正的换行字符，C3 多行 OLED 逻辑才能生效。
 - 使用 ECS 历史 v103 PCM 样本完成真实 STT→Agnes→OLED 验证：120,706 字节、约 3.77 秒，三段链路均返回成功。
 - 当前线上仍是 v103 M0 和旧版 `despod.service`；该功能分支当前不部署、不 release、不 OTA。实时按键采集仍需现场回归。
+
+
+## M1 后端实现接力（2026-08-06）
+
+- 实现入口：`/root/Desktoppy/M1_BACKEND_IMPLEMENTATION.md`。
+- canonical 分支：`m1-stt-pipeline`，当前设计提交：`42b3593`。
+- ECS Agent 只在 `/root/Desktoppy` 开发；`/root/esp32-firmware` 继续作为线上 M0 运行目录，禁止直接替换。
+- 第一阶段确认使用 FastAPI + 单进程 Uvicorn + systemd + SQLite 元数据 + 有界 asyncio 队列；M1 只绑定 `127.0.0.1:8786`。
+- 目标是当前 MAC `14:63:93:90:CF:94` 的无 OTA canary：现有 v0.0.103 WebSocket 接收录音，M1 顺序执行 STT → Agent → display → OLED。
+- 本阶段不做 TTS、多 ECS、Railway 迁移和多设备压测；M0 WebSocket、OTA 服务和固件基线保持不变。
+- ECS Agent 开始编码前必须先读完整实现说明；每完成一小段先跑文档规定的测试，再更新本 HANDOFF 的状态和风险。
