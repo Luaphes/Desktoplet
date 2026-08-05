@@ -15,8 +15,15 @@
 - 已发布固件：`/root/esp32-firmware/releases/v0.0.103/firmware.bin`。
 - OTA 固件 SHA-256：`c9087229238a1cfe8684bc15bd77c4f39fe2dc75e1baf9f34d4e02f3d5be3dbf`。
 - 回滚副本：`/root/esp32-firmware/firmware.previous.bin`。
-- 自动 OTA 指令已写入 `/tmp/ws_cmd.json`。设备当前未供电/未连接；再次上线后服务端会自动下发，只有 ECS 收到同一 MAC 上报 `version=v0.0.103` 才算升级完成。
+- OTA 命令队列当前为空；板子最近回连由 ECS 上报 `version=103`，v0.0.103 新版本标识尚未在设备日志中确认。
 - ECS 当前未安装 PlatformIO。下一位 Agent 若要完全在 ECS 开发和发布，应先建立可重复的构建环境，再继续修改固件；不要重新依赖本地串口刷写。
+
+## M0 OTA 基线（冻结）
+
+- `v0.0.103` 是当前线上 M0 稳定基线；除 OTA 回滚或安全修复外，不再从 M1 分支向板子发布固件。
+- 只有 `main` 的版本化发布才允许进入 OTA 服务；`m1-stt-validation` 只做 artifact 和验证，不自动 release、不自动 OTA。
+- OTA 完备性已按“远程下载、双分区、失败重试、60 秒在线确认、ECS 版本上报”验收；后续 M1 验证不能破坏这条路径。
+- 当前开发接力分支：`m1-stt-validation`；它从 `m1-stt-pipeline` 派生，尚未进入 `main`。
 
 ## 本轮根因与修复
 

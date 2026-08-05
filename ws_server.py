@@ -288,8 +288,8 @@ def _stt_transcribe(pcm_path: str) -> str:
     return r.json().get("text", "").strip()
 
 AGNES_SYSTEM = (
-    "你是 ESP32 桌面助手。用户说的话已通过语音识别转成文字。\\n"
-    "回复要求：50字以内，用\\n分最多4行，中文口语化。"
+    "你是 ESP32 桌面助手。用户说的话已通过语音识别转成文字。\n"
+    "回复要求：50字以内，用\n分最多4行，中文口语化。"
     "不理解时说「没太听清，再说一次？」"
 )
 
@@ -329,7 +329,7 @@ async def _process_recording(recording_id: str, pcm_path: str, target_cid: str):
         print(f"[M1:{target_cid}] Agnes: {reply}")
 
         # 3. Display
-        display_text = f"你说：{text}\\n\\n{reply}"
+        display_text = f"你说：{text}\n\n{reply}"
         await _safe_send(json.dumps({"type": "display", "text": display_text}), target_cid)
 
     except Exception as e:

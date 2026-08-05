@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, m1-stt-pipeline]
     paths:
+      - '.github/workflows/build.yml'
       - 'src/**'
       - 'platformio.ini'
       - 'partitions_ota.csv'
@@ -11,6 +12,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - '.github/workflows/build.yml'
       - 'src/**'
       - 'platformio.ini'
       - 'partitions_ota.csv'
@@ -39,7 +41,9 @@ jobs:
 
       - name: Set firmware version
         run: |
-          VER=v$(cat version.txt | tr -d ' \t\n\r')
+          RAW_VERSION=$(cat version.txt | tr -d ' \t\n\r')
+          VERSION=${RAW_VERSION#v}
+          VER=v$VERSION
           echo "VERSION=$VER" >> $GITHUB_ENV
           echo "Firmware version: $VER"
 
