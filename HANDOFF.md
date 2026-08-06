@@ -241,3 +241,45 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 - GitHub Actions run 31118543206 已触发，当前等待 runner；ECS OTA 目录暂保留 v105，未用本机临时包绕过 release。
 - 发布后验收：先通过 `http://118.31.46.156:23717/firmware.bin` OTA；再下发/触发“我无法获取你当前的位置”样本，确认“获”与其它中文均可见。
 
+
+## M1 延迟与 Hermes Gateway 接力（2026-08-07）
+
+### CI 真实状态
+
+- run `31118543206` 不是“仍排队”：最终结论为 `failure`。
+- build job `92673920330` 结论为 `cancelled`，GitHub 注释为：Hosted Runner 多次尝试后仍未获取到 runner。
+- 这是 GitHub runner 基础设施失败，不是 v0.0.106 源码编译错误；本机隔离 PlatformIO 构建已通过，Flash 72.4%。
+- 没有生成正式 Release artifact；ECS OTA 目录保持 v105。后续先重跑 Hosted Runner，再做 v106 OTA。
+
+### 当前真实链路
+
+```text
+ESP32 录音
+  -> ESP 本地 SPIFFS 录音文件
+  -> M0 WebSocket :8765（上传 mulaw 分片，收到 mic_stop）
+  -> M1 POST 127.0.0.1:8786
+  -> SiliconFlow STT
+  -> Agnes OpenAI-compatible /v1/chat/completions
+  -> M1 job done
+  -> M0 轮询后发送 display JSON
+  -> OLED
+```
+
+- `ws_server.py` 不直接调用 STT/Agent；`m1_service/worker.py` 顺序调用 `stt_provider.transcribe` 与 `agent_provider.chat`。
+- `m1_service/providers/agent.py` 当前是 Agnes 的薄 HTTP adapter：直接 POST JSON `messages=[system,user]`。
+- 当前 `session_id` / `device_id` 只传入函数签名，没有拼入 Agent 历史；当前不是 Hermes Session/Memory 闭环。
+- M0 的 `_fit_oled` 只负责换行/截断；JSON 不是慢点。当前 Agent 非流式，必须完整返回后才下发 OLED。
+
+### 延迟证据（ECS 日志/SQLite）
+
+- ESP 上传段：M0 的 `mic_start -> mic_stop` 即录音文件上传窗口；近期样本约 `3.47s`（126,848 bytes）、`4.26s`（145,264 bytes）、`7.19s`（171,858 bytes）。固件每轮主循环只发送一个 1KB WebSocket binary frame。
+- M0 -> M1：`mic_stop -> job submitted` 约 `45-67ms`，不是秒级瓶颈。
+- M1 provider 段：近期 job 从 created 到 done 约 `1.6s`、`2.0-2.6s`、`32.4s`；现有 store 只保留最终 `updated_at`，还不能区分 STT 与 Agent 各自耗时。
+- 轮询间隔是 `0.5s`，OLED JSON/绘制耗时可忽略。体感“拔线后迟迟没有处理中”主要来自 ESP 上传；“处理中后长时间不变”来自 STT+Agent 串行、非流式及其公网长尾。
+- STT 默认 timeout 30s、最多 2 次重试；Agent timeout 30s、最多 1 次重试，失败重试会进一步放大长尾。不要仅靠降低 timeout 修复。
+
+### Hermes 现状与正确入口
+
+- ECS 当前 `hermes-gateway.service` 是 `gateway run --profile feishu`，用于 Feishu 消息接入；它不是设备 API，当前没有监听 8642/9119。
+- Hermes 已安装内置 `gateway/platforms/api_server.py`，提供 OpenAI-compatible `POST /v1/chat/completions`、`X-Hermes-Session-Id` 会话续接、SQLite session store 和 SSE streaming；当前未启用。
+- `hermes serve` 是桌面/远程客户端用的 JSON-RPC/WebSocket backend，不能等同于设备 Agent Gateway；不要让 ESP 直接连 Feishu messaging gateway。
