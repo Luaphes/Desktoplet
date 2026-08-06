@@ -283,8 +283,9 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
             String text = "";
             jsonStringValue(msg, "text", text);
             u8g2.clearBuffer();
-            // 中文字体：wqy12 覆盖常用汉字（需 enableUTF8Print，见 setup）
-            u8g2.setFont(u8g2_font_wqy12_t_chinese2);
+            // 中文字体：使用完整 GB2312 覆盖，避免 chinese2 子集缺少常用字（如“获”）。
+            // drawUTF8 将收到的 UTF-8 文本转换为 Unicode 字形。
+            u8g2.setFont(u8g2_font_wqy12_t_gb2312);
 
             // Multi-line: split by \\n, draw up to 4 lines
             int y = 14;
