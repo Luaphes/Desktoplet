@@ -204,3 +204,12 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 - 修复提交：9689ba9，version.txt 升为 v0.0.105，本机 PlatformIO 隔离构建成功（RAM 14.3%，Flash 62.1%）。
 - 当前状态：M1 分支已推送；main 是其祖先，可安全 fast-forward 发布。发布/OTA 前仍需保留 v0.0.104 回滚可用性。
 
+
+
+## v0.0.105 OTA 结果（2026-08-06 23:40 CST）
+
+- GitHub Release HTTPS 直链在 ESP32 上出现 OTA Failed，原因是 release URL 的 302/CDN 下载链路不适配当前设备 OTA 客户端；板子未掉出 v104。
+- 已将正式 GitHub Release artifact（SHA-256 51c9555a5895c09014dd282d113c10329ad18d385fa1f8e6d845dce04d1055a7）放入 ECS OTA 目录；旧 v104 备份为 firmware.v104.before-v105.bin。
+- 通过 ECS HTTP http://118.31.46.156:23717/firmware.bin 重试成功：HTTP 200，设备断线后于 23:39:18 上报 v0.0.105，M1 healthz 仍为 200。
+- 剩余验收：在 v105 上重新进行一次真实语音，确认 Agent 中文回复不再出现异常符号；确认后冻结 v105 OLED 修复。
+
