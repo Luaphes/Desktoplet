@@ -108,6 +108,25 @@ class WsCanaryTestCase(unittest.TestCase):
         text = "你说：你好\n\n好的"
         self.assertEqual(ws_server._fit_oled(text), text)
 
+    def test_display_uses_ensure_ascii_false(self):
+        """display 事件不得含 \\uXXXX 转义（固件不解析，OLED 会显示乱码）。"""
+        captured = []
+
+        async def fake_safe_send(msg, target=None):
+            captured.append(msg)
+
+        async def run():
+            ws_server._safe_send = fake_safe_send
+            await ws_server._display("你说：让我们打个招呼吧。\n\n好的", "0")
+
+        asyncio.run(run())
+        self.assertEqual(len(captured), 1)
+        raw = captured[0]
+        self.assertNotIn("\\u", raw, f"display 含 unicode 转义: {raw}")
+        parsed = json.loads(raw)
+        self.assertEqual(parsed["type"], "display")
+        self.assertIn("让我们打个招呼吧", parsed["text"])
+
     # ---- canary 提交/轮询（打测试版 M1）----
 
     def test_submit_and_poll_done(self):
@@ -123,7 +142,8 @@ class WsCanaryTestCase(unittest.TestCase):
         asyncio.run(run())
         texts = self._display_texts(captured)
         self.assertIn("处理中...", texts)
-        done = [t for t in texts if t.startswith("你说：")]
+        # OLED 只显示 Agent 返回（产品语义：不回显「你说：」转写）
+        done = [t for t in texts if t == "好的，稍等。"]
         self.assertEqual(len(done), 1)
         self.assertEqual(self.fake.stt_calls, 1)
         self.assertEqual(self.fake.agent_calls, 1)

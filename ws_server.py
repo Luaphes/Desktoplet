@@ -17,7 +17,9 @@ import httpx
 CANARY_MAC = "14:63:93:90:CF:94"
 M1_BASE = "http://127.0.0.1:8786"
 M1_POLL_INTERVAL = 0.5
-M1_POLL_TIMEOUT = 60.0
+# Provider 端允许有限重试；轮询窗口要覆盖 STT/Agent 的正常长尾，
+# 避免后端仍在处理时 gateway 先给 OLED 发“服务暂不可用”。
+M1_POLL_TIMEOUT = 180.0
 
 ESP32s = {}
 _next_id = 0
@@ -259,6 +261,17 @@ def get_public_ip():
 
 # ---- M1 canary：提交任务 + 轮询状态 + OLED 事件 ----
 
+async def _display(text: str, cid: str):
+    """发送 OLED display 事件。
+
+    ensure_ascii=False 让中文/换行以 UTF-8 原样进 JSON——固件 JSON 解析
+    不处理 \\uXXXX 转义（此前 OLED 显示过字面 \\uFF0C 乱码），
+    \\n 换行是固件支持的标准转义（多行 OLED 已验证）。
+    """
+    await _safe_send(json.dumps({"type": "display", "text": text},
+                                ensure_ascii=False), cid)
+
+
 def _fit_oled(text: str, max_lines: int = 4, max_chars: int = 12) -> str:
     """OLED 128x64 / wqy12 中文约 10-12 字一行、最多约 4-5 行。
     服务端先截断，避免大段文本推给板子。"""
@@ -290,34 +303,24 @@ async def _submit_m1_job(recording_id: str, audio_path: str,
         # submit 用 2s（快速失败告知用户）；轮询用 5s（M1 偶发慢响应不误判）
         if resp.status_code == 409:
             # M1 单 in-flight 已满，本次录音未被接受：诚实告知，不假装处理中。
-            await _safe_send(json.dumps({
-                "type": "display", "text": "服务忙，稍后再试"
-            }), cid)
+            await _display("服务忙，稍后再试", cid)
             return
         if resp.status_code not in (200, 202):
             print(f"[M1:{cid}] submit failed HTTP {resp.status_code}")
-            await _safe_send(json.dumps({
-                "type": "display", "text": "服务暂不可用"
-            }), cid)
+            await _display("服务暂不可用", cid)
             return
         try:
             job_id = resp.json()["job_id"]
         except (ValueError, KeyError):
             print(f"[M1:{cid}] submit bad response")
-            await _safe_send(json.dumps({
-                "type": "display", "text": "服务暂不可用"
-            }), cid)
+            await _display("服务暂不可用", cid)
             return
         print(f"[M1:{cid}] job {job_id} submitted (rec={recording_id})")
-        await _safe_send(json.dumps({
-            "type": "display", "text": "处理中..."
-        }), cid)
+        await _display("处理中...", cid)
         await _poll_m1_job(job_id, cid)
     except httpx.HTTPError:
         print(f"[M1:{cid}] M1 unreachable")
-        await _safe_send(json.dumps({
-            "type": "display", "text": "服务暂不可用"
-        }), cid)
+        await _display("服务暂不可用", cid)
 
 
 async def _poll_m1_job(job_id: str, cid: str):
@@ -329,9 +332,7 @@ async def _poll_m1_job(job_id: str, cid: str):
                 resp = await client.get(f"{M1_BASE}/internal/v1/jobs/{job_id}")
                 if resp.status_code == 404:
                     print(f"[M1:{cid}] job {job_id} gone")
-                    await _safe_send(json.dumps({
-                        "type": "display", "text": "服务暂不可用"
-                    }), cid)
+                    await _display("服务暂不可用", cid)
                     return
                 if resp.status_code != 200:
                     print(f"[M1:{cid}] poll HTTP {resp.status_code}")
@@ -346,31 +347,23 @@ async def _poll_m1_job(job_id: str, cid: str):
                     transcript = (job.get("transcript") or "").strip()
                     reply = (job.get("reply") or "").strip()
                     if not transcript:
-                        await _safe_send(json.dumps({
-                            "type": "display", "text": "没听清..."
-                        }), cid)
+                        await _display("没听清...", cid)
                     else:
-                        text = _fit_oled(f"你说：{transcript}\n\n{reply}")
-                        await _safe_send(json.dumps({
-                            "type": "display", "text": text
-                        }), cid)
+                        # OLED 只显示 Agent 返回（产品语义：转写是中间状态，
+                        # 不回显给用户）；4 行截断。
+                        text = _fit_oled(reply or "已收到")
+                        await _display(text, cid)
                     print(f"[M1:{cid}] job {job_id} done")
                 else:  # failed
                     print(f"[M1:{cid}] job {job_id} failed "
                           f"error_code={job.get('error_code')}")
-                    await _safe_send(json.dumps({
-                        "type": "display", "text": "服务暂不可用"
-                    }), cid)
+                    await _display("服务暂不可用", cid)
                 return
         print(f"[M1:{cid}] job {job_id} poll timeout")
-        await _safe_send(json.dumps({
-            "type": "display", "text": "服务暂不可用"
-        }), cid)
+        await _display("服务暂不可用", cid)
     except httpx.HTTPError:
         print(f"[M1:{cid}] M1 unreachable while polling {job_id}")
-        await _safe_send(json.dumps({
-            "type": "display", "text": "服务暂不可用"
-        }), cid)
+        await _display("服务暂不可用", cid)
 
 async def main():
     print("WebSocket 服务端启动，等待 ESP32 连接...")

@@ -28,7 +28,7 @@ class Settings:
     poll_interval: float = field(default_factory=lambda: float(
         _env("DESPOD_M1_POLL_INTERVAL", "0.5")))
     job_timeout: float = field(default_factory=lambda: float(
-        _env("DESPOD_M1_JOB_TIMEOUT", "60")))
+        _env("DESPOD_M1_JOB_TIMEOUT", "180")))
     # --- SiliconFlow STT ---
     sf_api_key: str = field(default_factory=lambda: _env(
         "SILICONFLOW_API_KEY"))
@@ -47,10 +47,12 @@ class Settings:
         "AGNES_BASE_URL", "https://api.agnes-ai.cn/v1"))
     agnes_model: str = field(default_factory=lambda: _env(
         "DESPOD_M1_AGENT_MODEL", "agnes-2.5-flash"))
+    # Agent 有偶发长尾；15 秒会把一次可恢复的慢响应误判为失败。
+    # 30 秒 + 1 次重试仍是有界等待，适合当前单设备 canary。
     agent_timeout: float = field(default_factory=lambda: float(
-        _env("DESPOD_M1_AGENT_TIMEOUT", "15")))
+        _env("DESPOD_M1_AGENT_TIMEOUT", "30")))
     agent_max_retries: int = field(default_factory=lambda: int(
-        _env("DESPOD_M1_AGENT_MAX_RETRIES", "2")))
+        _env("DESPOD_M1_AGENT_MAX_RETRIES", "1")))
     # --- 音频 ---
     sample_rate: int = field(default_factory=lambda: int(
         _env("DESPOD_M1_SAMPLE_RATE", "16000")))

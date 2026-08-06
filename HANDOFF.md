@@ -177,3 +177,21 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
   2. `get_public_ip()` 为 b8cb47a 遗留的 OTA 相关改动，不在 M1 范畴，保留
   3. 恢复的 job 若在 Agent 阶段崩溃，重启后会重新执行 STT（重复调用一次模型）——契约接受「扫描恢复避免丢任务」，幂等在 recording_id 层保证不重复创建
 - **准入建议**：验收 A 全部通过，可进入 Canary（B 阶段）
+
+
+## M1 Canary 实时状态更新（2026-08-06 23:20 CST）
+
+> 本节覆盖前文“服务尚未安装 / 等待真实板回归”的旧状态，接力时以本节为准。
+
+- despod-m1.service 已安装并由 systemd active 托管，监听 127.0.0.1:8786；despod.service 与 despod-firmware.service 同时 active。
+- 当前板子已真实回连，MAC 14:63:93:90:CF:94，固件 v0.0.104；本次 M1 修复不需要 OTA。
+- 真实板端最近一次录音已落盘并成功提交 M1；此前唯一失败 job job-8b7cba74ea47 的根因为 agent_timeout，不是收音、STT 或 WebSocket 断线。
+- 以同一板端音频 /tmp/esp32_audio_4_1785988842_1.raw 做真实后端重放：约 17.9 秒完成 STT → Agent，status=done，transcript/reply 均非空。
+- 本轮修复：
+  1. Agent 默认 timeout 15s → 30s，有限重试 2 → 1，保留有界等待；
+  2. M1 job/poll 预算扩到 180s，避免后端仍在处理时 Gateway 先发“服务暂不可用”；
+  3. display JSON 使用 ensure_ascii=False，中文以 UTF-8 原样发给固件；
+  4. OLED 成功态只显示 Agent 回复摘要（最多 4 行），处理中/失败/没听清仍有明确状态。
+- 验证：unittest 21 项通过，真实 API 诊断调用 3/3 成功；重启后健康检查 200，三项 systemd 服务 active。
+- 当前唯一未完成项：用户在板端再说一句短句，确认真实 WebSocket 回传的“处理中 → Agent 回复”确实落到 OLED。若仍无回显，优先看 journalctl -u despod.service 的 job ... done 和 display 下发日志，不再重新刷固件。
+
