@@ -295,7 +295,9 @@ void wsEvent(WStype_t type, uint8_t *data, size_t len) {
                 String line = (nl >= 0) ? text.substring(start, nl) : text.substring(start);
                 line.trim();
                 if (line.length() > 0) {
-                    u8g2.drawStr(0, y, line.c_str());
+                    // drawStr treats UTF-8 bytes as legacy single-byte glyphs;
+                    // drawUTF8 is required for Chinese text on the WQY font.
+                    u8g2.drawUTF8(0, y, line.c_str());
                     y += 12;
                     lines++;
                 }
