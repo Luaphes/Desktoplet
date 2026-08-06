@@ -195,3 +195,12 @@ M1 的最小闭环是：`recording_id` → 本地录音上传 → STT → `job_i
 - 验证：unittest 21 项通过，真实 API 诊断调用 3/3 成功；重启后健康检查 200，三项 systemd 服务 active。
 - 当前唯一未完成项：用户在板端再说一句短句，确认真实 WebSocket 回传的“处理中 → Agent 回复”确实落到 OLED。若仍无回显，优先看 journalctl -u despod.service 的 job ... done 和 display 下发日志，不再重新刷固件。
 
+
+
+## v0.0.105 OLED UTF-8 修复（2026-08-06 23:30 CST）
+
+- 真实板 v0.0.104 的 job 已完成：STT transcript 与 Agent reply 均非空；OLED 出现两个异常符号，问题不在 ECS。
+- 根因：M1 中文 display 路径使用 u8g2.drawStr()，该 API 将 UTF-8 多字节序列当作单字节字形；WQY 中文字体必须使用 u8g2.drawUTF8()。
+- 修复提交：9689ba9，version.txt 升为 v0.0.105，本机 PlatformIO 隔离构建成功（RAM 14.3%，Flash 62.1%）。
+- 当前状态：M1 分支已推送；main 是其祖先，可安全 fast-forward 发布。发布/OTA 前仍需保留 v0.0.104 回滚可用性。
+
