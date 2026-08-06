@@ -104,6 +104,13 @@ class WsCanaryTestCase(unittest.TestCase):
             self.assertLessEqual(len(ln), 12)
         self.assertIn("…", out)
 
+    def test_fit_oled_wraps_long_reply(self):
+        out = ws_server._fit_oled("我是Agnes，由Sapiens AI开发。很高兴见到你！")
+        lines = out.split("\n")
+        self.assertGreater(len(lines), 1)
+        self.assertLessEqual(len(lines), 4)
+        self.assertTrue(all(len(line) <= 12 for line in lines))
+
     def test_fit_oled_short_text_unchanged(self):
         text = "你说：你好\n\n好的"
         self.assertEqual(ws_server._fit_oled(text), text)

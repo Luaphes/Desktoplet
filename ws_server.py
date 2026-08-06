@@ -273,16 +273,40 @@ async def _display(text: str, cid: str):
 
 
 def _fit_oled(text: str, max_lines: int = 4, max_chars: int = 12) -> str:
-    """OLED 128x64 / wqy12 中文约 10-12 字一行、最多约 4-5 行。
-    服务端先截断，避免大段文本推给板子。"""
-    lines = text.split("\n")
+    """按 OLED 行宽自动换行，最多 max_lines 行，超出才加省略号。"""
+    source_lines = text.split("\n")
     out = []
-    for ln in lines:
+    truncated = False
+    for index, raw in enumerate(source_lines):
         if len(out) >= max_lines:
+            truncated = True
             break
-        if len(ln) > max_chars:
-            ln = ln[: max_chars - 1] + "…"
-        out.append(ln)
+        if raw == "":
+            out.append("")
+            continue
+        while raw:
+            if len(out) >= max_lines:
+                truncated = True
+                break
+            if len(raw) <= max_chars:
+                out.append(raw)
+                raw = ""
+            elif len(out) == max_lines - 1:
+                out.append(raw[: max_chars - 1] + "…")
+                truncated = True
+                raw = ""
+            else:
+                out.append(raw[:max_chars])
+                raw = raw[max_chars:]
+        if truncated:
+            break
+        if index < len(source_lines) - 1 and len(out) >= max_lines:
+            truncated = True
+            break
+    if truncated and out and not out[-1].endswith("…"):
+        last = out[-1]
+        out[-1] = (last[: max_chars - 1] + "…"
+                   if len(last) >= max_chars else last + "…")
     return "\n".join(out)
 
 
